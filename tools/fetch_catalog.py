@@ -48,14 +48,14 @@ UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
 
 # Размеры и качество картинок (подбирались под бюджет ~1,3 ГБ на 8 тыс. игр)
-COVER_SIZE = (512, 512)
+COVER_SIZE = (640, 640)
 SHOT_SIZE = (480, 270)
-COVER_QUALITY = 75
+COVER_QUALITY = 80
 SHOT_QUALITY = 70
 MAX_SHOTS = 4
 DESC_MAX = 1500
 # Просим у CDN уже уменьшенную картинку; если не получится, качаем оригинал
-COVER_FETCH_W = 640
+COVER_FETCH_W = 800
 SHOT_FETCH_W = 800
 
 PAK_MAGIC = b"PS4CATPK"
@@ -328,7 +328,7 @@ def parse_page(page_html, product_id=None):
 
 def sized_url(url, width):
     base = url.split("?", 1)[0]
-    return "%s?w=%d&thumb=true" % (base, width)
+    return "%s?w=%d" % (base, width)
 
 
 def process_image(data, size, quality):
@@ -348,13 +348,19 @@ def process_image(data, size, quality):
 
 
 def fetch_image(url, size, quality, fetch_w, delay):
-    """Сначала пробуем уменьшенную версию с CDN, при HTTP-ошибке или битой картинке - оригинал."""
+    """Сначала пробуем уменьшенную версию с CDN. Если CDN ответил ошибкой, битой картинкой или
+    слишком маленькой миниатюрой (меньше 80% нужной ширины), качаем оригинал."""
     attempts = [sized_url(url, fetch_w), url]
+    min_w = int(size[0] * 0.8)
     last = None
-    for u in attempts:
+    for i, u in enumerate(attempts):
         time.sleep(delay)
         try:
-            return process_image(http_get(u), size, quality)
+            raw = http_get(u)
+            if i == 0 and Image.open(io.BytesIO(raw)).size[0] < min_w:
+                last = ValueError("CDN вернул слишком маленькую картинку")
+                continue
+            return process_image(raw, size, quality)
         except HttpError as e:
             last = e
         except (OSError, ValueError) as e:  # Pillow не смог открыть
@@ -375,6 +381,15 @@ class Stats:
             self.counts[status] = self.counts.get(status, 0) + 1
             self.consecutive_net = self.consecutive_net + 1 if status == "neterr" else 0
             return self.consecutive_net
+
+
+def is_russian(text):
+    """Текст в основном на кириллице (магазин иногда отдаёт английское описание на русской странице)."""
+    letters = re.findall(r"[A-Za-zЀ-ӿ]", text)
+    if len(letters) < 4:
+        return False
+    cyr = sum(1 for c in letters if c >= "Ѐ")
+    return cyr / len(letters) >= 0.4
 
 
 def _has_cyrillic(s):
@@ -400,11 +415,16 @@ def process_game(g, cache_dir, opts):
             log("  [%s] %s" % (g["id"], msg))
 
     net_failed = False
-    page = None
+    got_page = False
     lang = ""
+    desc_raw = ""
+    desc_name = ""
+    shots = []
     product_id = g["cid"]
-    # 1) страница ru-RU, затем en-US как запасная
-    for loc, lng in (("ru-ru", "ru"), ("en-us", "en")):
+    # 1) страницы по очереди (ru-ru, ru-ua, en-us). Русское описание берём с первой страницы, где оно
+    #    действительно на русском (магазин может отдать английский текст на русской странице);
+    #    скриншоты - с первой страницы, где они есть.
+    for loc in opts.locales:
         url = re.sub(r"/[a-z]{2}-[a-z]{2}/", "/%s/" % loc, g["href"], count=1)
         time.sleep(opts.delay)
         try:
@@ -416,27 +436,32 @@ def process_game(g, cache_dir, opts):
             say("%s: сеть: %s" % (loc, e))
             net_failed = True
             break
+        got_page = True
         if debug:
             opts.save_debug("%s_%s.html" % (g["id"], loc), raw)
         p = parse_page(raw, product_id)
         for ln in p["diag"]:
             say("%s: %s" % (loc, ln))
-        say("%s: название=%r описание=%d симв. скриншотов=%d" % (loc, p["name"], len(p["desc"]), len(p["shots"])))
-        if page is None:
-            page, lang = p, lng
-        if p["desc"] and p["shots"]:
-            page, lang = p, lng
+        ru = bool(p["desc"]) and is_russian(p["desc"])
+        say("%s: название=%r описание=%d симв. (%s) скриншотов=%d" % (
+            loc, p["name"], len(p["desc"]), "рус" if ru else "не рус", len(p["shots"])))
+        if p["shots"] and not shots:
+            shots = p["shots"]
+        if p["desc"]:
+            if ru and lang != "ru":
+                desc_raw, desc_name, lang = p["desc"], p["name"], "ru"
+            elif not desc_raw:
+                desc_raw, desc_name, lang = p["desc"], p["name"], "en"
+        if lang == "ru" and shots:
             break
-        # берём лучшее из двух: сохраняем то, где есть больше данных
-        if (bool(p["desc"]) + bool(p["shots"])) > (bool(page["desc"]) + bool(page["shots"])):
-            page, lang = p, lng
     if net_failed:
         return "neterr"
-    if page is None:
+    if not got_page:
         meta_path.write_text(json.dumps({"status": "nopage"}), encoding="utf-8")
         return "nopage"
+    page = {"shots": shots, "name": desc_name}
 
-    desc = truncate_text(page["desc"]) if page["desc"] else ""
+    desc = truncate_text(desc_raw) if desc_raw else ""
     (d / "desc.txt").write_text(desc, encoding="utf-8")
 
     # 2) обложка из каталога
@@ -546,6 +571,8 @@ def main(argv=None):
     ap.add_argument("--ids", help="только эти Title ID через запятую, например CUSA00419,CUSA01234")
     ap.add_argument("--workers", type=int, default=6, help="параллельных загрузок (по умолч. 6)")
     ap.add_argument("--delay", type=float, default=0.15, help="пауза перед запросом, сек (по умолч. 0.15)")
+    ap.add_argument("--locales", default="ru-ru,ru-ua,en-us",
+                    help="какие версии страницы пробовать по порядку (по умолч. ru-ru,ru-ua,en-us)")
     ap.add_argument("--retry-partial", action="store_true", help="повторить игры с неполными данными")
     ap.add_argument("--force", action="store_true", help="перекачать всё выбранное заново")
     ap.add_argument("--pack-only", action="store_true", help="не качать, только собрать pak из кэша")
@@ -553,6 +580,7 @@ def main(argv=None):
     ap.add_argument("--debug", action="store_true", help="подробный вывод и сохранение страниц в data/debug/")
     opts = ap.parse_args(argv)
 
+    opts.locales = [x.strip().lower() for x in opts.locales.split(",") if x.strip()]
     out_dir = Path(opts.out)
     cache_dir = out_dir / "cache"
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -129,7 +129,7 @@ class ImageTests(unittest.TestCase):
         self.assertEqual(Image.open(io.BytesIO(out)).mode, "RGB")
 
     def test_sized_url(self):
-        self.assertEqual(fc.sized_url("https://a/b.png?w=10", 640), "https://a/b.png?w=640&thumb=true")
+        self.assertEqual(fc.sized_url("https://a/b.png?w=10", 640), "https://a/b.png?w=640")
 
 
 @unittest.skipIf(Image is None, "нужен Pillow")
@@ -168,6 +168,8 @@ class PipelineTests(unittest.TestCase):
         if url.startswith("https://img/"):
             if "?w=" in url and "s0_3" in url:  # проверка запасного пути без ?w=
                 raise fc.HttpError(400, url)
+            if "?w=" in url and "cover0" in url:  # CDN отдал крошечную миниатюру -> нужен оригинал
+                return png_bytes(100, 100)
             return png_bytes(1920, 1080) if "/s" in url else png_bytes(600, 600)
         raise fc.HttpError(404, url)
 
@@ -192,7 +194,7 @@ class PipelineTests(unittest.TestCase):
         off, ln = g0["d"]
         self.assertEqual(pak[off:off + ln].decode("utf-8"), "Описание 0")
         off, ln = g0["c"]
-        self.assertEqual(Image.open(io.BytesIO(pak[off:off + ln])).size, (512, 512))
+        self.assertEqual(Image.open(io.BytesIO(pak[off:off + ln])).size, (600, 600))  # оригинал 600x600 не увеличиваем
         off, ln = g0["s"][0]
         self.assertEqual(Image.open(io.BytesIO(pak[off:off + ln])).size, (480, 270))
         # смещения идут подряд без дыр и перекрытий
@@ -207,6 +209,36 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(o, pos)
             pos += n
         self.assertEqual(pos, len(pak))
+
+    def test_russian_from_second_locale(self):
+        cid = "EP0001-CUSA00003_00-GAME00000002"
+        href = "https://store.playstation.com/en-us/product/" + cid
+        shots = ["https://img/s2_%d.png" % k for k in range(1, 3)]
+        self.pages[href.replace("/en-us/", "/ru-ru/")] = make_page(cid, "Game 2", "<p>This is a plain English description of the game.</p>", shots)
+        self.pages[href.replace("/en-us/", "/ru-ua/")] = make_page(cid, "Игра два", "<p>Это описание игры на русском языке.</p>", [])
+        self.run_main("--ids", "CUSA00003")
+        doc = json.loads((self.root / "data" / "catalog.json").read_text(encoding="utf-8"))
+        g = doc["games"][0]
+        pak = (self.root / "data" / "catalog.pak").read_bytes()
+        off, ln = g["d"]
+        self.assertEqual(pak[off:off + ln].decode("utf-8"), "Это описание игры на русском языке.")
+        self.assertEqual(g["r"], "Игра два")
+        self.assertEqual(len(g["s"]), 2)  # скриншоты взяты со страницы, где они были
+
+    def test_english_kept_if_no_russian_anywhere(self):
+        cid = "EP0001-CUSA00003_00-GAME00000002"
+        href = "https://store.playstation.com/en-us/product/" + cid
+        self.pages[href.replace("/en-us/", "/ru-ru/")] = make_page(cid, "Game 2", "<p>Only English text exists here for the game.</p>", ["https://img/s2_1.png"])
+        self.run_main("--ids", "CUSA00003")
+        doc = json.loads((self.root / "data" / "catalog.json").read_text(encoding="utf-8"))
+        pak = (self.root / "data" / "catalog.pak").read_bytes()
+        off, ln = doc["games"][0]["d"]
+        self.assertEqual(pak[off:off + ln].decode("utf-8"), "Only English text exists here for the game.")
+
+    def test_is_russian(self):
+        self.assertTrue(fc.is_russian("Это описание игры на русском языке."))
+        self.assertFalse(fc.is_russian("This is an English description."))
+        self.assertFalse(fc.is_russian("Да"))
 
     def test_resume_skips_done(self):
         self.run_main("--no-pack")
