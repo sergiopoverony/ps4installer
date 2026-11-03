@@ -156,6 +156,7 @@ def load_catalog_file(path):
 def select_games(items):
     """Оставляет PS4 (CUSA), по одной записи на Title ID (предпочитаем основную игру, а не издание)."""
     best = {}
+    alts = {}
     for it in items:
         uuid = it.get("uuid", "")
         m = _TITLE_ID_RE.search(uuid)
@@ -166,6 +167,7 @@ def select_games(items):
         if it.get("rating") in _DROP_RATINGS:
             continue
         tid = m.group(1)
+        alts.setdefault(tid, []).append((it.get("href", ""), uuid))
         key = (_RATING_PRIORITY.get(it.get("rating"), 3), len(it.get("name", "")), uuid)
         if tid not in best or key < best[tid][0]:
             best[tid] = (key, it)
@@ -177,6 +179,7 @@ def select_games(items):
             "name": clean_title(it.get("name", tid)),
             "image": it.get("image", ""),
             "href": it.get("href", ""),
+            "alts": [a for a in alts.get(tid, []) if a[1] != it["uuid"]],
         })
     cusa_names = {g["name"].lower() for g in games if g["id"].startswith("CUSA")}
     games = [g for g in games if g["id"].startswith("CUSA") or g["name"].lower() not in cusa_names]
@@ -514,17 +517,24 @@ def process_game(g, cache_dir, opts):
     #    действительно на русском (магазин может отдать английский текст на русской странице);
     #    скриншоты - с первой страницы, где они есть.
     for loc in opts.locales:
-        url = re.sub(r"/[a-z]{2}-[a-z]{2}/", "/%s/" % loc, g["href"], count=1)
-        time.sleep(opts.delay)
-        try:
-            raw = http_get(url).decode("utf-8", "replace")
-        except HttpError as e:
-            say("%s: %s" % (loc, e))
-            continue
-        except NetError as e:
-            say("%s: сеть: %s" % (loc, e))
-            net_failed = True
+        raw = None
+        for href, cid_try in [(g["href"], g["cid"])] + list(g.get("alts") or [])[:4]:
+            url = re.sub(r"/[a-z]{2}-[a-z]{2}/", "/%s/" % loc, href, count=1)
+            time.sleep(opts.delay)
+            try:
+                raw = http_get(url).decode("utf-8", "replace")
+                product_id = cid_try
+                break
+            except HttpError as e:
+                say("%s: %s" % (loc, e))
+            except NetError as e:
+                say("%s: сеть: %s" % (loc, e))
+                net_failed = True
+                break
+        if net_failed:
             break
+        if raw is None:
+            continue
         got_page = True
         if debug:
             opts.save_debug("%s_%s.html" % (g["id"], loc), raw)
