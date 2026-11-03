@@ -13,7 +13,7 @@
 #define DATA_DIR "/data/ps4installer"
 #endif
 #ifndef HTTP_PORT
-#define HTTP_PORT 8787
+#define HTTP_PORT 8284
 #endif
 
 int main(int argc, char** argv) {
