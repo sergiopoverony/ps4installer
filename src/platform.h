@@ -8,6 +8,8 @@
 namespace platform {
 
 void notify(const std::string& msg);  // всплывающее уведомление на экране консоли
+// Уведомление с иконкой (icon_uri: путь к картинке или адрес вида cxml://...; пусто - без иконки).
+void notify_icon(const std::string& msg, const std::string& icon_uri);
 void power_tick();                    // не давать консоли уйти в сон на время установки
 bool free_bytes(const char* path, uint64_t* out);
 

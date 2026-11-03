@@ -34,6 +34,7 @@ static int g_fake_next_task = 100;
 static std::map<std::string, int> g_fake_busy;
 
 void notify(const std::string& msg) { log_printf("NOTIFY: %s", msg.c_str()); }
+void notify_icon(const std::string& msg, const std::string& icon_uri) { log_printf("NOTIFY: %s [icon %s]", msg.c_str(), icon_uri.c_str()); }
 void power_tick() {}
 
 bool free_bytes(const char* path, uint64_t* out) {
@@ -203,6 +204,17 @@ void notify(const std::string& msg) {
     req.targetId = -1;
     req.useIconImageUri = 0;
     snprintf(req.message, sizeof(req.message), "%s", msg.c_str());
+    sceKernelSendNotificationRequest(0, &req, sizeof(req), 0);
+}
+
+void notify_icon(const std::string& msg, const std::string& icon_uri) {
+    NotificationRequest req;
+    memset(&req, 0, sizeof(req));
+    req.type = 0;
+    req.targetId = -1;
+    req.useIconImageUri = icon_uri.empty() ? 0 : 1;
+    snprintf(req.message, sizeof(req.message), "%s", msg.c_str());
+    snprintf(req.iconUri, sizeof(req.iconUri), "%s", icon_uri.c_str());
     sceKernelSendNotificationRequest(0, &req, sizeof(req), 0);
 }
 

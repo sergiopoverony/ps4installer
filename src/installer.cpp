@@ -30,6 +30,7 @@ std::condition_variable g_cv;
 std::vector<Job> g_jobs;
 bool g_stop = false;
 bool g_worker_started = false;
+bool g_notified = true;  // уведомление «установлено» по этой пачке уже показано
 std::thread g_worker;
 int g_stall_sec = 180;
 int g_poll_ms = 1000;
@@ -155,6 +156,34 @@ void run_job(int idx) {
     }
 }
 
+// Когда вся пачка закончилась без ошибок - показываем на экране консоли «ИМЯ ИГРЫ / УСТАНОВЛЕНО».
+// Иконка берётся из каталога метаданных игры; работает ли это на консоли - не проверено.
+void notify_if_finished() {
+    std::string title, tid;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        if (g_notified || any_active_locked()) {
+            return;
+        }
+        g_notified = true;
+        const Job* pick = nullptr;
+        for (const Job& j : g_jobs) {
+            if (j.status == "failed") {
+                return;
+            }
+            if (!pick || (j.pkg.kind == "game" && pick->pkg.kind != "game")) {
+                pick = &j;
+            }
+        }
+        if (!pick) {
+            return;
+        }
+        title = pick->pkg.title.empty() ? pick->pkg.title_id : pick->pkg.title;
+        tid = pick->pkg.title_id;
+    }
+    platform::notify_icon(title + "\nУСТАНОВЛЕНО", "/user/appmeta/" + tid + "/icon0.png");
+}
+
 void worker_main() {
     for (;;) {
         int idx;
@@ -168,6 +197,7 @@ void worker_main() {
             g_jobs[idx].status = "registering";
         }
         run_job(idx);
+        notify_if_finished();
     }
 }
 
@@ -274,6 +304,7 @@ EnqueueResult enqueue(const std::vector<std::string>& paths) {
             return fail(409, "busy", "установка уже идёт");
         }
         g_jobs.clear();
+        g_notified = false;
         for (const PkgInfo& e : list) {
             Job j;
             j.pkg = e;
