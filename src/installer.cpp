@@ -181,7 +181,7 @@ void notify_if_finished() {
         title = pick->pkg.title.empty() ? pick->pkg.title_id : pick->pkg.title;
         tid = pick->pkg.title_id;
     }
-    platform::notify_icon(title + "\nУСТАНОВЛЕНО", "/user/appmeta/" + tid + "/icon0.png");
+    platform::notify_icon(title + "\nУстановлено", "/user/appmeta/" + tid + "/icon0.png");
 }
 
 void worker_main() {
