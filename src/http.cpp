@@ -76,7 +76,7 @@ Response route(const Request& rq) {
     }
     if (rq.path == "/scan") {
         std::vector<PkgInfo> list = scan_packages(3000);
-        sort_for_install(&list);
+        sort_by_size(&list);
         r.body = "{\"ok\":true,\"count\":" + std::to_string(list.size()) + ",\"packages\":[";
         for (size_t i = 0; i < list.size(); i++) {
             r.body += (i ? "," : "") + pkg_json(list[i]);

@@ -194,6 +194,17 @@ class ServiceTests(unittest.TestCase):
         self.assertIn("CCCCCCCCCCCCCCCC", reg[1])
         self.assertIn("AAAAAAAAAAAAAAAA", reg[2])
 
+    def test_patch_after_its_game_and_same_package_once(self):
+        # патч больше игры, но ставится после неё; копия игры на флешке пропускается
+        game = make_pkg(DATA_PKG / "g.pkg", "UP0001-CUSA00021_00-GAMEGAMEGAMEGAME", 0x4000)
+        patch = make_pkg(DATA_PKG / "p.pkg", "UP0001-CUSA00021_00-GAMEGAMEGAMEGAME", 0x8000, flags=0x00100000)
+        other = make_pkg(DATA_PKG / "o.pkg", "UP0001-CUSA00022_00-OTHEROTHEROTHERO", 0x6000)
+        copy = make_pkg(Path(USB_PREFIX + "0") / "g.pkg", "UP0001-CUSA00021_00-GAMEGAMEGAMEGAME", 0x4000)
+        self.srv = Server()
+        code, j = self.srv.post("/install", {"paths": [patch, other, game, copy]})
+        self.assertEqual(code, 200, j)
+        self.assertEqual(j["order"], [other, game, patch])
+
     def test_bad_requests(self):
         ok = make_pkg(DATA_PKG / "ok.pkg", "UP0001-CUSA00021_00-OKOKOKOKOKOKOKOK", 0x2000)
         (DATA_PKG / "garbage.pkg").write_bytes(b"x" * 5000)

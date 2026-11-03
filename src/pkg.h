@@ -42,7 +42,11 @@ std::string bgft_path(const std::string& path);
 // Ищет .pkg в /data/pkg и /mnt/usb0../mnt/usb9, читает заголовки.
 std::vector<PkgInfo> scan_packages(size_t max_files);
 
-// Сортировка для установки: от самого большого файла к самому маленькому.
+// Просто по размеру, от большего к меньшему (для списка /scan).
+void sort_by_size(std::vector<PkgInfo>* list);
+
+// Порядок установки: от самого большого файла к самому маленькому, но патчи и дополнения
+// идут сразу после своей игры (по title_id), даже если они больше неё.
 void sort_for_install(std::vector<PkgInfo>* list);
 
 // Корневые папки, которые просматривает scan_packages().

@@ -205,6 +205,15 @@ EnqueueResult enqueue(const std::vector<std::string>& paths) {
         if (!pkg_read_header(p, &info, &err)) {
             return fail(422, "bad_pkg", p + ": " + err);
         }
+        // Один и тот же пакет на диске и на флешке (тот же content_id, тип и размер) ставим один раз.
+        bool same = false;
+        for (const PkgInfo& e : list) {
+            same = same || (e.content_id == info.content_id && e.content_type == info.content_type &&
+                            e.file_size == info.file_size);
+        }
+        if (same) {
+            continue;
+        }
         list.push_back(info);
     }
     sort_for_install(&list);

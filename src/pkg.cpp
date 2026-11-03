@@ -225,11 +225,53 @@ std::vector<PkgInfo> scan_packages(size_t max_files) {
     return out;
 }
 
-void sort_for_install(std::vector<PkgInfo>* list) {
+void sort_by_size(std::vector<PkgInfo>* list) {
     std::stable_sort(list->begin(), list->end(), [](const PkgInfo& a, const PkgInfo& b) {
         if (a.file_size != b.file_size) {
             return a.file_size > b.file_size;
         }
         return a.path < b.path;
     });
+}
+
+void sort_for_install(std::vector<PkgInfo>* list) {
+    sort_by_size(list);
+    // Патч и дополнения нельзя ставить раньше своей игры: сразу после игры (того же title_id)
+    // идут её патчи и дополнения, тоже от большего к меньшему. Если игры в списке нет
+    // (она уже установлена), они остаются на своих местах по размеру.
+    auto is_base = [](const PkgInfo& e) { return e.kind == "game" && !e.is_patch; };
+    std::vector<PkgInfo> out;
+    std::vector<bool> used(list->size(), false);
+    for (size_t i = 0; i < list->size(); i++) {
+        if (used[i]) {
+            continue;
+        }
+        const PkgInfo& e = (*list)[i];
+        if (!is_base(e)) {
+            bool base_in_list = false;
+            for (size_t j = 0; j < list->size(); j++) {
+                base_in_list = base_in_list || (is_base((*list)[j]) && (*list)[j].title_id == e.title_id);
+            }
+            if (base_in_list) {
+                continue;  // будет выведен вместе со своей игрой
+            }
+        }
+        used[i] = true;
+        out.push_back(e);
+        if (is_base(e)) {
+            for (size_t j = 0; j < list->size(); j++) {
+                if (!used[j] && !is_base((*list)[j]) && (*list)[j].title_id == e.title_id) {
+                    used[j] = true;
+                    out.push_back((*list)[j]);
+                }
+            }
+        }
+    }
+    // На случай двух игр с одним title_id: ничего не потеряем.
+    for (size_t i = 0; i < list->size(); i++) {
+        if (!used[i]) {
+            out.push_back((*list)[i]);
+        }
+    }
+    *list = out;
 }
