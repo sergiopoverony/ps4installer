@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "log.h"
+#include "version.h"
 
 #ifdef HOST_TEST
 #include <sys/statvfs.h>
@@ -15,8 +16,10 @@
 #include <mutex>
 #else
 #include <dlfcn.h>
+#include <sys/mman.h>
 #include <sys/mount.h>
 #include <sys/param.h>
+#include <unistd.h>
 #endif
 
 namespace platform {
@@ -351,15 +354,41 @@ bool bgft_load(std::string* err) {
         *err = g_load_err;
         return false;
     }
-    // Память под BGFT берём не из кучи (она может быть исчерпана после многих замен службы), а из
-    // заранее выделенного статического буфера: он есть с момента загрузки программы.
+    // Инициализация BGFT уже роняла службу (сигнал 11 внутри init, и приставка зависала). Поэтому перед
+    // вызовом пишем метку-файл: если служба этой версии упала в init, при следующем запуске init
+    // пропускается (считаем BGFT уже инициализированным), а не валит приставку снова.
+    // Новая версия службы пробует init заново (метка с номером версии).
+    const char* marker = "/data/ps4installer/bgft_init_" APP_VERSION ".marker";
+    if (access(marker, F_OK) == 0) {
+        log_printf("bgft init: прошлый запуск этой версии упал внутри init, пропускаем (удалите %s, чтобы повторить)", marker);
+        g_info += "(init пропущен после аварии) ";
+        g_loaded = true;
+        return true;
+    }
+    // Память под BGFT: отдельная анонимная страница-область (mmap) - она точно читается и пишется.
+    // Статический буфер в .bss и куча malloc уже подводили.
     static BgftInitParams params;
-    alignas(4096) static uint8_t bgft_heap[1 * 1024 * 1024];
+    const size_t heap_size = 1 * 1024 * 1024;
+    void* heap = mmap(nullptr, heap_size, PROT_READ | PROT_WRITE, MAP_ANON | MAP_PRIVATE, -1, 0);
+    if (heap == MAP_FAILED) {
+        log_printf("bgft: mmap кучи не удался");
+        g_load_err = "нет памяти для кучи BGFT";
+        *err = g_load_err;
+        return false;
+    }
+    memset(heap, 0, heap_size);
     memset(&params, 0, sizeof(params));
-    params.heap = bgft_heap;
-    params.heapSize = sizeof(bgft_heap);
+    params.heap = heap;
+    params.heapSize = heap_size;
+    FILE* mk = fopen(marker, "w");
+    if (mk) {
+        fputs("init started\n", mk);
+        fclose(mk);
+    }
+    log_printf("bgft init: вызываем, куча %p, %zu байт", heap, heap_size);
     int ret = init(&params);
     log_printf("bgft init -> 0x%08X", (unsigned)ret);
+    unlink(marker);   // дошли сюда - не упали
     // 0x80990001 после замены службы на новую версию: старая копия уже инициализировала BGFT
     // в этом же процессе. Считаем это "уже инициализирован" (на консоли не проверено).
     if ((unsigned)ret == 0x80990001u) {
