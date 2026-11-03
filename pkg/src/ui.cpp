@@ -495,8 +495,8 @@ static std::string job_label(const InstallJob& j)
 }
 
 // ---- Информация об игре из каталога (обложка, 4 скриншота, описание) ----
-static const int COVER_W = 400, COVER_H = 400;
-static const int SHOT_W = 290, SHOT_H = 163, SHOT_GAP = 14, SHOT_N = 4;
+static const int COVER_W = 330, COVER_H = 330;
+static const int SHOT_W = 240, SHOT_H = 135, SHOT_GAP = 14, SHOT_N = 4;
 static const CatEntry* g_selCat = nullptr;
 static CatImage g_imgCover;
 static CatImage g_imgShots[SHOT_N];
@@ -570,17 +570,19 @@ static void draw_info_top(const Game& g, int x, int y, int W)
         else if (g_selCat) fill(sx, sy, SHOT_W, SHOT_H, C_TILE);
     }
     int dy = sy + SHOT_H + 14 + FONT_PX;
-    std::vector<std::string> d = wrap_lines(g_selDesc, maxc, 4);
+    std::vector<std::string> d = wrap_lines(g_selDesc, maxc, 3);
     for (size_t i = 0; i < d.size(); i++) draw_text(d[i], rx, dy + (int)i * (FONT_PX + 6), C_TEXT, C_PANEL);
 }
 
 static void draw_confirm()
 {
-    const int W = 1700, H = 640;
-    int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + 40;
+    const int W = 1700;
+    const int H = g_cardReason == CARD_LAUNCH ? 500 : 570;
+    // по центру между шапкой и нижней строкой подсказок
+    int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + (FRAME_HEIGHT - 100 - HEAD_H - H) / 2;
     draw_panel(x, y, W, H);
     draw_info_top(g_sel, x, y, W);
-    int tx = x + 40, ty = y + 30 + COVER_H + 50;
+    int tx = x + 40, ty = y + 30 + COVER_H + 60;
     int maxc = (W - 80) / g_cellW;
 
     if (g_cardReason == CARD_LAUNCH) {   // окно установленной игры: только запуск
