@@ -286,7 +286,7 @@ EnqueueResult enqueue(const std::vector<std::string>& paths) {
     {
         std::vector<PkgInfo> ok;
         for (const PkgInfo& e : list) {
-            if (false && e.incomplete()) {  // проверка отменена по решению пользователя
+            if (e.incomplete()) {  // недокачанный файл ставить нельзя
                 skipped.push_back(SkippedPkg{e, "incomplete"});
             } else {
                 ok.push_back(e);

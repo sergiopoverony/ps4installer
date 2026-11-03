@@ -193,6 +193,9 @@ static void load_games()
     std::string err;
     if (service_scan(items, err)) {
         build_games(items, g_games);
+        for (size_t i = 0; i < g_games.size(); i++)
+            for (size_t k = 0; k < g_games[i].files.size(); k++)
+                if (g_games[i].files[k].incomplete) g_games[i].incomplete = true;
         mark_installed();
         if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
         g_topRow = 0;

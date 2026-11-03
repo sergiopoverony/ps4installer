@@ -26,7 +26,10 @@ struct PkgInfo {
     std::string kind;        // game | patch | dlc | dlc_nodata | delta_patch
     bool is_patch = false;
     // Файл меньше, чем записано в заголовке: докачан не до конца (сравнение не проверено на всех PKG).
-    bool incomplete() const { return pkg_size > 0 && file_size < pkg_size; }
+    // Торрент-клиент создаёт файл сразу полного размера, а непришедшие куски остаются нулями.
+    // Поэтому ещё берём пробы из разных мест файла (pkg_probe_zeros); нулевых проб много - файл не докачан.
+    int zero_blocks = 0;   // сколько проб из набора оказалось сплошь из нулей
+    bool incomplete() const { return (pkg_size > 0 && file_size < pkg_size) || zero_blocks >= 2; }
     // из param.sfo внутри PKG (необязательно: пусто, если прочитать не удалось)
     std::string title;       // TITLE
     std::string app_ver;     // APP_VER, например "01.04"
@@ -54,6 +57,9 @@ struct SkippedPkg {
 std::vector<PkgInfo> plan_install(const std::vector<PkgInfo>& in, int fw_major, std::vector<SkippedPkg>* skipped);
 
 // Читает и проверяет заголовок. При ошибке возвращает false и текст причины.
+// Читает пробы по 4 КиБ из ~48 мест файла и считает, сколько из них целиком нулевые.
+// Результат запоминается по (путь, размер, время изменения). Маленькие файлы (<8 МиБ) не проверяются.
+int pkg_probe_zeros(const std::string& path, uint64_t size, long mtime);
 bool pkg_read_header(const std::string& path, PkgInfo* out, std::string* err);
 
 // Разбор уже прочитанных первых байт файла (для тестов и pkg_read_header).

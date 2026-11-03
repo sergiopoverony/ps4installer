@@ -328,6 +328,26 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(statuses[0], "done")
         self.assertIn("cancelled", statuses[1:])
 
+    def test_torrent_preallocated_file_is_incomplete(self):
+        # полный размер, но куски не пришли: внутри нули (как у недокачанного торрента)
+        p = make_pkg(DATA_PKG / "torrent.pkg", "UP0001-CUSA00091_00-TORRENTTORRENTTO", 0x1000000)
+        self.srv = Server(extra=[])
+        item = [x for x in self.srv.get("/scan")[1]["packages"] if x["path"] == p][0]
+        self.assertTrue(item["incomplete"])
+        self.assertGreaterEqual(item["zero_blocks"], 2)
+        code, j = self.srv.post("/install", {"paths": [p]})
+        self.assertEqual(j["skipped"][0]["reason"], "incomplete")
+
+    def test_complete_file_is_not_flagged(self):
+        p = make_pkg(DATA_PKG / "full.pkg", "UP0001-CUSA00092_00-FULLFULLFULLFULL", 0x1000000)
+        data = bytearray(open(p, "rb").read())
+        for i in range(0x1000, len(data), 7):
+            data[i] = 1 + (i % 250)
+        open(p, "wb").write(bytes(data))
+        self.srv = Server(extra=[])
+        item = [x for x in self.srv.get("/scan")[1]["packages"] if x["path"] == p][0]
+        self.assertFalse(item["incomplete"])
+
     def test_queue_appends_second_batch(self):
         a = make_pkg(DATA_PKG / "qa.pkg", "UP0001-CUSA00071_00-QAQAQAQAQAQAQAQA", 0x9000)
         b = make_pkg(DATA_PKG / "qb.pkg", "UP0001-CUSA00072_00-QBQBQBQBQBQBQBQB", 0x5000)

@@ -207,6 +207,44 @@ void pkg_apply_name_tags(PkgInfo* p) {
     p->dlc_name = has_word(w, "dlc", "dlcs", "expansion", "addon");
 }
 
+int pkg_probe_zeros(const std::string& path, uint64_t size, long mtime) {
+    static std::map<std::string, int> cache;
+    std::string key = path + "|" + std::to_string(size) + "|" + std::to_string(mtime);
+    auto it = cache.find(key);
+    if (it != cache.end()) {
+        return it->second;
+    }
+    int zeros = 0;
+    const uint64_t BLK = 4096;
+    const int N = 48;
+    if (size >= 8ULL * 1024 * 1024) {
+        FILE* f = fopen(path.c_str(), "rb");
+        if (f) {
+            std::vector<uint8_t> b(BLK);
+            for (int i = 0; i <= N; i++) {
+                // N мест по всему файлу (без самого начала) и последняя проба - самый конец.
+                uint64_t off = (i == N) ? size - BLK : ((size / (N + 1)) * (uint64_t)(i + 1)) / BLK * BLK;
+                if (fseeko(f, (off_t)off, SEEK_SET) != 0 || fread(b.data(), 1, BLK, f) != BLK) {
+                    continue;
+                }
+                bool zero = true;
+                for (uint64_t k = 0; k < BLK && zero; k++) {
+                    zero = b[k] == 0;
+                }
+                if (zero) {
+                    zeros++;
+                }
+            }
+            fclose(f);
+        }
+        if (zeros > 0) {
+            log_printf("pkg: %d нулевых проб из %d: %s", zeros, N + 1, path.c_str());
+        }
+    }
+    cache[key] = zeros;
+    return zeros;
+}
+
 bool pkg_read_header(const std::string& path, PkgInfo* out, std::string* err) {
     struct stat st;
     if (stat(path.c_str(), &st) != 0) {
@@ -228,6 +266,7 @@ bool pkg_read_header(const std::string& path, PkgInfo* out, std::string* err) {
     out->file_size = (uint64_t)st.st_size;
     bool ok = pkg_parse_header(buf, n, out, err);
     if (ok) {
+        out->zero_blocks = pkg_probe_zeros(path, out->file_size, (long)st.st_mtime);
         read_sfo(f, out->file_size, buf, out);
         pkg_apply_name_tags(out);
     }
