@@ -495,8 +495,8 @@ static std::string job_label(const InstallJob& j)
 }
 
 // ---- Информация об игре из каталога (обложка, 4 скриншота, описание) ----
-static const int COVER_W = 330, COVER_H = 330;
-static const int SHOT_W = 240, SHOT_H = 135, SHOT_GAP = 14, SHOT_N = 4;
+static const int COVER_W = 350, COVER_H = 350;
+static const int SHOT_W = 254, SHOT_H = 143, SHOT_GAP = 14, SHOT_N = 4;
 static const CatEntry* g_selCat = nullptr;
 static CatImage g_imgCover;
 static CatImage g_imgShots[SHOT_N];
@@ -576,8 +576,8 @@ static void draw_info_top(const Game& g, int x, int y, int W)
 
 static void draw_confirm()
 {
-    const int W = 1700;
-    const int H = g_cardReason == CARD_LAUNCH ? 500 : 570;
+    const int W = 1500;   // 30 + обложка 350 + 30 + 4 скриншота с промежутками (4*254+3*14) + 30 = 1478
+    const int H = g_cardReason == CARD_LAUNCH ? 520 : 590;
     // по центру между шапкой и нижней строкой подсказок
     int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + (FRAME_HEIGHT - 100 - HEAD_H - H) / 2;
     draw_panel(x, y, W, H);
