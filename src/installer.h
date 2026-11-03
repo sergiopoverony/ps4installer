@@ -14,6 +14,7 @@ struct EnqueueResult {
     std::string error;       // код ошибки: bad_request | bad_path | bad_pkg | no_space | busy | bgft
     std::string detail;      // пояснение для человека
     std::string order_json;  // JSON-массив путей в порядке установки
+    std::string skipped_json = "[]";  // что пропущено и почему: [{"path":..,"reason":..}]
     uint64_t need = 0;
     uint64_t free = 0;
 };

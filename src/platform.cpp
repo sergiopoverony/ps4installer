@@ -50,6 +50,13 @@ bool free_bytes(const char* path, uint64_t* out) {
     return true;
 }
 
+int firmware_major(std::string* text) {
+    const char* env = getenv("FAKE_FW");  // например "13.02" или "9.00"
+    std::string v = env ? env : "13.02";
+    *text = v;
+    return atoi(v.c_str());
+}
+
 bool bgft_load(std::string* err) {
     (void)err;
     return true;
@@ -208,6 +215,46 @@ bool free_bytes(const char* path, uint64_t* out) {
     }
     *out = (uint64_t)sf.f_bavail * (uint64_t)sf.f_bsize;
     return true;
+}
+
+extern "C" int sceKernelGetSystemSwVersion(void* out);
+
+// Структура версии системы (по открытым описаниям; на консоли не проверена).
+struct SystemSwVersion {
+    uint64_t size;
+    char version_string[0x1C];
+    uint32_t version;  // BCD: 0x13020000 для 13.02
+};
+
+int firmware_major(std::string* text) {
+    static int cached = -2;
+    static std::string cached_text;
+    if (cached == -2) {
+        SystemSwVersion sw;
+        memset(&sw, 0, sizeof(sw));
+        sw.size = sizeof(sw);
+        int ret = sceKernelGetSystemSwVersion(&sw);
+        sw.version_string[sizeof(sw.version_string) - 1] = 0;
+        cached = -1;
+        if (ret == 0) {
+            int major = atoi(sw.version_string);
+            if (major <= 0) {  // запасной путь: BCD из числа версии
+                major = (int)(((sw.version >> 28) & 0xF) * 10 + ((sw.version >> 24) & 0xF));
+            }
+            cached = major > 0 ? major : -1;
+            cached_text = sw.version_string;
+            if (cached_text.empty()) {
+                char b[16];
+                snprintf(b, sizeof(b), "%X.%02X", (unsigned)(sw.version >> 24), (unsigned)((sw.version >> 16) & 0xFF));
+                cached_text = b;
+            }
+        } else {
+            cached_text = "unknown";
+        }
+        log_printf("firmware: %s (major=%d, ret=0x%08X)", cached_text.c_str(), cached, (unsigned)ret);
+    }
+    *text = cached_text;
+    return cached;
 }
 
 static void* find_sym(void* h, const char* a, const char* b, std::string* used) {

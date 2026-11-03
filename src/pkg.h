@@ -25,7 +25,31 @@ struct PkgInfo {
     uint32_t flags = 0;
     std::string kind;        // game | patch | dlc | dlc_nodata | delta_patch
     bool is_patch = false;
+    // из param.sfo внутри PKG (необязательно: пусто, если прочитать не удалось)
+    std::string title;       // TITLE
+    std::string app_ver;     // APP_VER, например "01.04"
+    int ver_num = -1;        // 01.04 -> 104, -1 если неизвестно
+    // признаки по имени файла и папки (см. name_tags)
+    bool backport = false;   // Backport / Back Port / BP
+    bool rus = false;        // RUS / RU / Russian / русификатор
+    bool dlc_name = false;   // слово DLC в имени
 };
+
+// Ищет признаки в имени файла и имени его папки (по целым словам, регистр не важен).
+void pkg_apply_name_tags(PkgInfo* p);
+
+// Один пакет, который не будет установлен, и причина (для ответа службы).
+struct SkippedPkg {
+    PkgInfo pkg;
+    std::string reason;
+};
+
+// Решает, что и в каком порядке ставить:
+//  - backport пропускается, если прошивка выше 9 (или неизвестна, fw_major < 0);
+//  - из нескольких обычных патчей одной игры остаётся самый новый (по APP_VER, если он известен у всех);
+//  - порядок: самая большая игра первой; у каждой игры сразу за ней патчи, потом DLC, потом
+//    русификаторы (по имени); внутри группы от большего файла к меньшему.
+std::vector<PkgInfo> plan_install(const std::vector<PkgInfo>& in, int fw_major, std::vector<SkippedPkg>* skipped);
 
 // Читает и проверяет заголовок. При ошибке возвращает false и текст причины.
 bool pkg_read_header(const std::string& path, PkgInfo* out, std::string* err);
@@ -44,10 +68,6 @@ std::vector<PkgInfo> scan_packages(size_t max_files);
 
 // Просто по размеру, от большего к меньшему (для списка /scan).
 void sort_by_size(std::vector<PkgInfo>* list);
-
-// Порядок установки: от самого большого файла к самому маленькому, но патчи и дополнения
-// идут сразу после своей игры (по title_id), даже если они больше неё.
-void sort_for_install(std::vector<PkgInfo>* list);
 
 // Корневые папки, которые просматривает scan_packages().
 std::vector<std::string> pkg_roots();

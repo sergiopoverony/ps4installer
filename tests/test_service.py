@@ -214,6 +214,26 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual([x["status"] for x in st["jobs"]], ["done"])
         self.assertEqual(self.log_text().count("система занята"), 2)
 
+    def test_backport_skipped_on_new_firmware(self):
+        game = make_pkg(DATA_PKG / "Game" / "Game 1.00.pkg", "UP0001-CUSA00041_00-BPGAMEBPGAMEBPGA", 0x4000)
+        bp = make_pkg(DATA_PKG / "Game" / "Game BackPort 6.72.pkg", "UP0001-CUSA00042_00-BPGAMEBPGAMEBPGB", 0x6000)
+        self.srv = Server()  # прошивка по умолчанию 13.02
+        code, j = self.srv.post("/install", {"paths": [game, bp]})
+        self.assertEqual(code, 200, j)
+        self.assertEqual(j["order"], [game])
+        self.assertEqual([x["path"] for x in j["skipped"]], [bp])
+        self.assertIn("backport", j["skipped"][0]["reason"])
+        self.srv.wait_idle()
+
+    def test_backport_installed_on_old_firmware(self):
+        bp = make_pkg(DATA_PKG / "Game BP.pkg", "UP0001-CUSA00043_00-BPGAMEBPGAMEBPGC", 0x4000)
+        self.srv = Server(env={"FAKE_FW": "9.00"})
+        code, j = self.srv.post("/install", {"paths": [bp]})
+        self.assertEqual(code, 200, j)
+        self.assertEqual(j["order"], [bp])
+        self.assertEqual(j["skipped"], [])
+        self.srv.wait_idle()
+
     def test_bad_requests(self):
         ok = make_pkg(DATA_PKG / "ok.pkg", "UP0001-CUSA00021_00-OKOKOKOKOKOKOKOK", 0x2000)
         (DATA_PKG / "garbage.pkg").write_bytes(b"x" * 5000)

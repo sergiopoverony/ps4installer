@@ -228,7 +228,13 @@ EnqueueResult enqueue(const std::vector<std::string>& paths) {
         }
         list.push_back(info);
     }
-    sort_for_install(&list);
+    std::string fw_str;
+    int fw_major = platform::firmware_major(&fw_str);
+    std::vector<SkippedPkg> skipped;
+    list = plan_install(list, fw_major, &skipped);
+    for (const SkippedPkg& sk : skipped) {
+        log_printf("enqueue: пропущен %s (%s)", sk.pkg.path.c_str(), sk.reason.c_str());
+    }
 
     uint64_t need = 0;
     for (const PkgInfo& e : list) {
@@ -241,6 +247,19 @@ EnqueueResult enqueue(const std::vector<std::string>& paths) {
         EnqueueResult r = fail(409, "no_space", "недостаточно места");
         r.need = need;
         r.free = free_b;
+        return r;
+    }
+
+    EnqueueResult r;
+    r.skipped_json = "[";
+    for (size_t i = 0; i < skipped.size(); i++) {
+        r.skipped_json += std::string(i ? "," : "") + "{\"path\":\"" + json_escape(skipped[i].pkg.path) +
+                          "\",\"reason\":\"" + json_escape(skipped[i].reason) + "\"}";
+    }
+    r.skipped_json += "]";
+    if (list.empty()) {  // всё пропущено: ставить нечего
+        r.ok = true;
+        r.order_json = "[]";
         return r;
     }
 
@@ -269,7 +288,6 @@ EnqueueResult enqueue(const std::vector<std::string>& paths) {
     log_printf("enqueue: %zu пакетов, нужно %llu байт, свободно %llu", list.size(), (unsigned long long)need,
                (unsigned long long)free_b);
 
-    EnqueueResult r;
     r.ok = true;
     r.order_json = order_json(list);
     r.need = need;

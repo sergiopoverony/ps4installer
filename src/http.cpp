@@ -59,7 +59,9 @@ std::string pkg_json(const PkgInfo& p) {
     char num[96];
     snprintf(num, sizeof(num), "\"size\":%llu,", (unsigned long long)p.file_size);
     return "{\"path\":\"" + json_escape(p.path) + "\",\"content_id\":\"" + p.content_id + "\",\"title_id\":\"" +
-           p.title_id + "\",\"kind\":\"" + p.kind + "\"," + num + "\"patch\":" + (p.is_patch ? "true" : "false") + "}";
+           p.title_id + "\",\"kind\":\"" + p.kind + "\"," + num + "\"patch\":" + (p.is_patch ? "true" : "false") + ",\"title\":\"" + json_escape(p.title) +
+           "\",\"ver\":\"" + json_escape(p.app_ver) + "\",\"backport\":" + (p.backport ? "true" : "false") +
+           ",\"rus\":" + (p.rus ? "true" : "false") + ",\"dlc_name\":" + (p.dlc_name ? "true" : "false") + "}";
 }
 
 Response route(const Request& rq) {
@@ -70,8 +72,10 @@ Response route(const Request& rq) {
     if (rq.path == "/health") {
         std::string berr;
         platform::bgft_load(&berr);  // пробуем загрузить заранее, чтобы ошибка была видна сразу
-        r.body = std::string("{\"ok\":true,\"version\":\"" APP_VERSION "\",\"bgft\":\"") +
-                 json_escape(berr.empty() ? platform::bgft_info() : "error: " + berr) + "\"}";
+        std::string fw;
+        platform::firmware_major(&fw);
+        r.body = std::string("{\"ok\":true,\"version\":\"" APP_VERSION "\",\"fw\":\"") + json_escape(fw) +
+                 "\",\"bgft\":\"" + json_escape(berr.empty() ? platform::bgft_info() : "error: " + berr) + "\"}";
         return r;
     }
     if (rq.path == "/scan") {
@@ -112,7 +116,7 @@ Response route(const Request& rq) {
             }
             return r;
         }
-        r.body = "{\"ok\":true,\"queued\":" + std::to_string(paths.size()) + ",\"order\":" + e.order_json +
+        r.body = "{\"ok\":true,\"queued\":" + std::to_string(paths.size()) + ",\"order\":" + e.order_json + ",\"skipped\":" + e.skipped_json +
                  ",\"need\":" + std::to_string((unsigned long long)e.need) + ",\"free\":" +
                  std::to_string((unsigned long long)e.free) + "}";
         return r;
