@@ -551,7 +551,9 @@ def pack(games, cache_dir, out_dir, log=print):
             if meta.get("name_ru"):
                 entry["r"] = meta["name_ru"]
             entry["c"] = put((d / "cover.jpg").read_bytes())
-            dp = d / "desc.txt"
+            dp = d / "desc_ru.txt"  # перевод на русский (tools/translate_catalog.py), если есть
+            if not (dp.exists() and dp.stat().st_size):
+                dp = d / "desc.txt"
             if dp.exists() and dp.stat().st_size:
                 entry["d"] = put(dp.read_bytes())
             shots = []
