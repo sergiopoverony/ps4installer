@@ -3,6 +3,9 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 
+#include <signal.h>
+#include <unistd.h>
+
 #include <cstdarg>
 #include <cstdio>
 #include <ctime>
@@ -57,4 +60,33 @@ std::vector<std::string> log_tail(size_t max_lines) {
         out.push_back(g_tail[i]);
     }
     return out;
+}
+
+// В обработчике аварии нельзя пользоваться мьютексом и fprintf: пишем напрямую в файл.
+static int g_crash_fd = -1;
+
+static void crash_handler(int sig) {
+    char buf[64];
+    int n = snprintf(buf, sizeof(buf), "АВАРИЯ: сигнал %d\n", sig);
+    if (g_crash_fd >= 0 && n > 0) {
+        (void)write(g_crash_fd, buf, (size_t)n);
+        fsync(g_crash_fd);
+    }
+    _exit(128 + sig);
+}
+
+void log_install_crash_handler() {
+    std::string path;
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        if (!g_fp) {
+            return;
+        }
+        g_crash_fd = dup(fileno(g_fp));
+    }
+    int sigs[] = {SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT};
+    for (int s : sigs) {
+        signal(s, crash_handler);
+    }
+    (void)path;
 }

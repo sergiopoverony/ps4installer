@@ -7,6 +7,8 @@
 // log_open() должен быть самым первым вызовом в main(): если папки /data/ps4installer
 // после запуска payload'а нет, программа не дошла до main() (проблема загрузки).
 void log_open(const char* dir);
+// Записать в журнал номер сигнала при аварии (SIGSEGV и др.) и завершиться.
+void log_install_crash_handler();
 void log_printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 // Последние строки журнала (для /status).
 std::vector<std::string> log_tail(size_t max_lines);

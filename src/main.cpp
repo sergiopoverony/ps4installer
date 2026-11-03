@@ -20,6 +20,7 @@ int main(int argc, char** argv) {
     // Журнал открываем самым первым: если после запуска payload'а папки DATA_DIR нет,
     // программа не дошла до main() (проблема загрузки, а не нашей логики).
     log_open(DATA_DIR);
+    log_install_crash_handler();
     log_printf("ps4installerd %s запущен", APP_VERSION);
 
     signal(SIGPIPE, SIG_IGN);

@@ -63,6 +63,9 @@ std::string pkg_json(const PkgInfo& p) {
 }
 
 Response route(const Request& rq) {
+    if (rq.path != "/status" && rq.path != "/health") {  // опрос состояния не засоряет журнал
+        log_printf("http: %s %s (тело %d байт)", rq.method.c_str(), rq.path.c_str(), (int)rq.body.size());
+    }
     Response r;
     if (rq.path == "/health") {
         std::string berr;
