@@ -2,6 +2,7 @@
 // службы (/scan), навигация крестовиной и левым стиком, Квадрат - обновить список.
 // Остальные вкладки пока заглушки; окно установки добавляется следующим шагом.
 #include "ui.h"
+#include "catalog.h"
 #include "scene.h"
 #include "log.h"
 #include "service.h"
@@ -353,20 +354,91 @@ static std::string job_label(const InstallJob& j)
     return j.kind;
 }
 
+// ---- Информация об игре из каталога (обложка, 4 скриншота, описание) ----
+static const int COVER_W = 400, COVER_H = 400;
+static const int SHOT_W = 290, SHOT_H = 163, SHOT_GAP = 14, SHOT_N = 4;
+static const CatEntry* g_selCat = nullptr;
+static CatImage g_imgCover;
+static CatImage g_imgShots[SHOT_N];
+static std::string g_selDesc;
+
+static void info_clear()
+{
+    g_selCat = nullptr;
+    g_imgCover = CatImage();
+    for (int i = 0; i < SHOT_N; i++) g_imgShots[i] = CatImage();
+    g_selDesc.clear();
+}
+
+static void info_load(const Game& g)
+{
+    info_clear();
+    g_selCat = catalog_by_title_id(g.title_id);
+    if (!g_selCat) { logf_("ui: в каталоге нет %s", g.title_id.c_str()); return; }
+    catalog_image(g_selCat->cover, COVER_W, COVER_H, g_imgCover);
+    for (int i = 0; i < SHOT_N && i < (int)g_selCat->shots.size(); i++)
+        catalog_image(g_selCat->shots[(size_t)i], SHOT_W, SHOT_H, g_imgShots[i]);
+    g_selDesc = catalog_text(*g_selCat);
+}
+
+static void blit(const CatImage& im, int x, int y)
+{
+    if (!im.ok()) return;
+    for (int yy = 0; yy < im.h; yy++) {
+        int py = y + yy;
+        if (py < 0 || py >= FRAME_HEIGHT) continue;
+        for (int xx = 0; xx < im.w; xx++) {
+            int px = x + xx;
+            if (px < 0 || px >= FRAME_WIDTH) continue;
+            uint32_t v = im.px[(size_t)yy * im.w + xx];
+            Color c = { (uint8_t)(v >> 16), (uint8_t)(v >> 8), (uint8_t)v };
+            g_scene->PutPixel(px, py, c);
+        }
+    }
+}
+
+// Верхняя часть окна игры: слева обложка, справа названия, ряд скриншотов и описание.
+static void draw_info_top(const Game& g, int x, int y, int W)
+{
+    int cx = x + 30, cy = y + 30;
+    if (g_imgCover.ok()) blit(g_imgCover, cx, cy);
+    else {
+        fill(cx, cy, COVER_W, COVER_H, C_TILE);
+        std::string l = g.title.empty() ? "?" : g.title.substr(0, 1);
+        const unsigned char* p = (const unsigned char*)g.title.c_str();
+        const unsigned char* st = p;
+        if (*p) { decode_utf8(p); l = std::string((const char*)st, (size_t)(p - st)); }
+        draw_text(l, cx + (COVER_W - g_cellW) / 2, cy + COVER_H / 2 + FONT_PX / 3, C_DIM, C_TILE);
+    }
+    int rx = x + 30 + COVER_W + 30, rw = W - (rx - x) - 30;
+    int maxc = rw / g_cellW;
+    std::string en = g_selCat && !g_selCat->name_en.empty() ? g_selCat->name_en : g.title;
+    draw_text(fit_chars(en, maxc), rx, cy + FONT_PX, C_TEXT, C_PANEL);
+    if (g_selCat && !g_selCat->name_ru.empty() && g_selCat->name_ru != en)
+        draw_text(fit_chars(g_selCat->name_ru, maxc), rx, cy + FONT_PX + FONT_PX + 8, C_DIM, C_PANEL);
+    int sy = cy + 2 * (FONT_PX + 8) + 12;
+    for (int i = 0; i < SHOT_N; i++) {
+        int sx = rx + i * (SHOT_W + SHOT_GAP);
+        if (g_imgShots[i].ok()) blit(g_imgShots[i], sx, sy);
+        else if (g_selCat) fill(sx, sy, SHOT_W, SHOT_H, C_TILE);
+    }
+    int dy = sy + SHOT_H + 14 + FONT_PX;
+    std::vector<std::string> d = wrap_lines(g_selDesc, maxc, 4);
+    for (size_t i = 0; i < d.size(); i++) draw_text(d[i], rx, dy + (int)i * (FONT_PX + 6), C_TEXT, C_PANEL);
+}
+
 static void draw_confirm()
 {
-    const int W = 1300, H = 700;
-    int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + 40;
+    const int W = 1700, H = 900;
+    int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + 20;
     draw_panel(x, y, W, H);
-    int tx = x + 40, ty = y + 56;
+    draw_info_top(g_sel, x, y, W);
+    int tx = x + 40, ty = y + 30 + COVER_H + 50;
     int maxc = (W - 80) / g_cellW;
-    std::vector<std::string> t = wrap_lines(g_sel.title, maxc, 2);
-    for (size_t i = 0; i < t.size(); i++) draw_text(t[i], tx, ty + (int)i * (FONT_PX + 6), C_TEXT, C_PANEL);
-    ty += (int)t.size() * (FONT_PX + 6) + 20;
 
     draw_text("Будет установлено:", tx, ty, C_DIM, C_PANEL);
     ty += FONT_PX + 12;
-    int maxRows = 8;
+    int maxRows = 5;
     for (size_t i = 0; i < g_selFiles.size() && (int)i < maxRows; i++) {
         std::string lab = fit_chars(file_label(g_selFiles[i]), maxc - 14);
         std::string sz = fmt_size(g_selFiles[i].size);
@@ -385,7 +457,7 @@ static void draw_confirm()
     else draw_text("Свободное место узнать не удалось", tx, ty, C_WARN, C_PANEL);
 
     bool low = g_freeOk && g_selNeed > g_freeBytes;
-    int by = y + H - 130;
+    int by = y + H - 110;
     if (low) {
         fill(tx, by, W - 80, 52, C_RED_BG);
         std::string msg = "МАЛО МЕСТА - УДАЛИТЕ НЕНУЖНУЮ ИГРУ";
@@ -568,6 +640,7 @@ static unsigned pad_read()
 
 bool ui_init()
 {
+    catalog_load("/app0/assets/data");
     g_scene = new Scene2D(FRAME_WIDTH, FRAME_HEIGHT, FRAME_DEPTH);
     if (!g_scene->Init(0xC000000, 2)) { logf_("ui: scene init FAILED"); return false; }
     if (!g_scene->InitFont(&g_font, "/app0/assets/fonts/DejaVuSansMono.ttf", FONT_PX)) { logf_("ui: font init FAILED"); return false; }
@@ -673,6 +746,7 @@ void ui_pump()
                     g_selNeed = install_bytes(g_sel, service_fw_major()) + (g_instActive ? pending_bytes() : 0);
                     g_freeOk = service_free(g_freeBytes);
                     g_confirmErr.clear();
+                    info_load(g_sel);
                     g_mode = MODE_CONFIRM;
                     logf_("ui: окно установки: %s, нужно %llu, свободно %llu (ok=%d)", g_sel.title.c_str(),
                           (unsigned long long)g_selNeed, (unsigned long long)g_freeBytes, g_freeOk ? 1 : 0);
@@ -684,7 +758,7 @@ void ui_pump()
 
     if (g_svc == SVC_OK && g_mode == MODE_CONFIRM) {
         bool low = g_freeOk && g_selNeed > g_freeBytes;
-        if (pressed & ORBIS_PAD_BUTTON_CIRCLE) { g_mode = MODE_GRID; g_redraw = 2; }
+        if (pressed & ORBIS_PAD_BUTTON_CIRCLE) { info_clear(); g_mode = MODE_GRID; g_redraw = 2; }
         else if ((pressed & ORBIS_PAD_BUTTON_CROSS) && !low) {
             std::vector<std::string> paths;
             for (size_t i = 0; i < g_selFiles.size(); i++) paths.push_back(g_selFiles[i].path);
@@ -699,6 +773,7 @@ void ui_pump()
                 g_instActive = true;
                 g_instFinished = false;
                 g_lastPoll = 0;
+                info_clear();
                 g_mode = MODE_PROGRESS;
                 logf_("ui: установка запущена: %s (%d файлов)", g_sel.title.c_str(), (int)paths.size());
             } else {

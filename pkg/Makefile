@@ -21,6 +21,12 @@ APPVER      := $(shell sed -n 's/.*APP_VERSION "\(.*\)".*/\1/p' ../src/version.h
 
 ASSETS      := assets/fonts/DejaVuSansMono.ttf assets/fonts/LICENSE-DejaVu.txt assets/misc/ps4installerd.elf
 
+# Каталог игр (data/catalog.pak + data/catalog.json, делает tools/fetch_catalog.py). Если его нет -
+# в PKG кладётся пустой каталог: приложение работает, но без обложек и описаний.
+ifneq ($(wildcard ../data/catalog.pak),)
+ASSETS += assets/data/catalog.pak assets/data/catalog.json
+endif
+
 # Системные модули для приложения (без libc.prx приложение сразу вылетает). Берутся из набора OpenOrbis.
 LIBMODULES  := sce_module/libc.prx sce_module/libSceFios2.prx
 
@@ -36,7 +42,7 @@ CFLAGS      := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c $(EXTRA
 CXXFLAGS    := $(CFLAGS) -isystem $(TOOLCHAIN)/include/c++/v1
 LDFLAGS     := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crt1.o
 
-_unused     := $(shell mkdir -p $(INTDIR) sce_sys/about sce_module assets/misc)
+_unused     := $(shell mkdir -p $(INTDIR) sce_sys/about sce_module assets/misc assets/data)
 
 UNAME_S     := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
@@ -81,6 +87,12 @@ send:
 
 # Служба берётся из корня проекта (сборка: make в корне).
 assets/misc/ps4installerd.elf: ../build/ps4installerd.elf
+	cp $< $@
+
+assets/data/catalog.pak: ../data/catalog.pak
+	cp $< $@
+
+assets/data/catalog.json: ../data/catalog.json
 	cp $< $@
 
 sce_sys/icon0.png: gfx/icon0.png
