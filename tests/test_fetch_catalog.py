@@ -137,6 +137,13 @@ class ImageTests(unittest.TestCase):
         out = fc.process_image(png_bytes(64, 64, alpha=True), (32, 32), 75)
         self.assertEqual(Image.open(io.BytesIO(out)).mode, "RGB")
 
+    def test_safe_url(self):
+        u = "https://image.api.playstation.com/cdn/EP8908/CUSA03939_00/FREE_CONTENT/arcade archives_01.png?w=800"
+        self.assertEqual(fc.safe_url(u), "https://image.api.playstation.com/cdn/EP8908/CUSA03939_00/FREE_CONTENT/arcade%20archives_01.png?w=800")
+        ok = "https://a.b/p/x%20y.png?w=1&thumb=true"
+        self.assertEqual(fc.safe_url(ok), ok)  # уже закодированное не двойное кодируется
+        self.assertEqual(fc.safe_url("https://a.b/кириллица.png"), "https://a.b/%D0%BA%D0%B8%D1%80%D0%B8%D0%BB%D0%BB%D0%B8%D1%86%D0%B0.png")
+
     def test_sized_url(self):
         self.assertEqual(fc.sized_url("https://a/b.png?w=10", 640), "https://a/b.png?w=640")
 

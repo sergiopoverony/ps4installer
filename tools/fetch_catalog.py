@@ -30,11 +30,13 @@ import html as htmllib
 import io
 import json
 import re
+import http.client
 import struct
 import sys
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -80,7 +82,16 @@ class HttpError(Exception):
 
 # --------------------------------------------------------------------------- сеть
 
+def safe_url(url):
+    """Кодирует пробелы и прочие недопустимые символы в пути и query (уже закодированное %XX не трогает)."""
+    parts = urllib.parse.urlsplit(url)
+    path = urllib.parse.quote(parts.path, safe="/%:@!$&'()*+,;=~-._")
+    query = urllib.parse.quote(parts.query, safe="=&%:@!$'()*+,;/?~-._")
+    return urllib.parse.urlunsplit((parts.scheme, parts.netloc, path, query, ""))
+
+
 def http_get(url, timeout=30, tries=4):
+    url = safe_url(url)
     last = None
     for attempt in range(tries):
         req = urllib.request.Request(url, headers={
@@ -97,7 +108,9 @@ def http_get(url, timeout=30, tries=4):
                 time.sleep(min(60, 3 * (2 ** attempt)))
                 continue
             raise HttpError(e.code, url)
-        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError) as e:
+        except http.client.InvalidURL as e:
+            raise HttpError(0, "%s (%s)" % (url, e))
+        except (urllib.error.URLError, TimeoutError, ConnectionError, OSError, http.client.HTTPException) as e:
             last = e
             time.sleep(2 * (attempt + 1))
     raise NetError("%s: %s" % (url, last))
