@@ -266,7 +266,10 @@ def _desc_from_product(p, state):
 
 def parse_page(page_html, product_id=None):
     """Возвращает {'name','desc','shots','diag'}. diag - список строк для --debug."""
-    res = {"name": "", "desc": "", "shots": [], "diag": []}
+    res = {"name": "", "desc": "", "shots": [], "diag": [], "concept": ""}
+    mc = re.search(r"Concept:(\d+)", page_html)  # ID концепта один на все регионы магазина
+    if mc:
+        res["concept"] = mc.group(1)
     # На странице десятки блоков <script type="application/json"> (__NEXT_DATA__ и env:...).
     # Скриншоты лежат в блоке media-carousel как Product.media, описание - в HTML блока overview.
     docs = []
@@ -284,6 +287,12 @@ def parse_page(page_html, product_id=None):
                 break
         if state:
             break
+    if not product_id:  # страница, открытая по ID концепта: ID товара берём из самой страницы
+        for doc in docs:
+            pp = doc.get("props", {}).get("pageProps", {}) if isinstance(doc, dict) else {}
+            if isinstance(pp, dict) and isinstance(pp.get("productId"), str):
+                product_id = pp["productId"]
+                break
     cands = []
     for root in docs + ([state] if state else []):
         for d in _walk(root):
@@ -418,7 +427,15 @@ def process_game(g, cache_dir, opts):
             st = json.loads(meta_path.read_text(encoding="utf-8")).get("status")
         except ValueError:
             st = None
-        if st == "ok" or (st and not opts.retry_partial):
+        lang_done = None
+        if opts.refetch_desc:
+            try:
+                lang_done = json.loads(meta_path.read_text(encoding="utf-8")).get("lang")
+            except ValueError:
+                pass
+        if opts.refetch_desc and st in ("ok", "partial") and lang_done != "ru":
+            pass  # описание было не русским: пробуем получить русское (картинки из кэша не качаются заново)
+        elif st == "ok" or (st and not opts.retry_partial):
             return "skip"
     d.mkdir(parents=True, exist_ok=True)
     debug = opts.debug
@@ -434,6 +451,7 @@ def process_game(g, cache_dir, opts):
     desc_raw = ""
     desc_name = ""
     shots = []
+    concept_id = ""
     product_id = g["cid"]
     # 1) страницы по очереди (ru-ru, ru-ua, en-us). Русское описание берём с первой страницы, где оно
     #    действительно на русском (магазин может отдать английский текст на русской странице);
@@ -459,6 +477,8 @@ def process_game(g, cache_dir, opts):
         ru = bool(p["desc"]) and is_russian(p["desc"])
         say("%s: название=%r описание=%d симв. (%s) скриншотов=%d" % (
             loc, p["name"], len(p["desc"]), "рус" if ru else "не рус", len(p["shots"])))
+        if p["concept"] and not concept_id:
+            concept_id = p["concept"]
         if p["shots"] and not shots:
             shots = p["shots"]
         if p["desc"]:
@@ -468,6 +488,31 @@ def process_game(g, cache_dir, opts):
                 desc_raw, desc_name, lang = p["desc"], p["name"], "en"
         if lang == "ru" and shots:
             break
+    # 1б) русская версия по ID концепта (ID товара у каждого региона свой, концепт общий)
+    if got_page and not net_failed and lang != "ru" and concept_id:
+        for loc in opts.concept_locales:
+            url = "https://store.playstation.com/%s/concept/%s" % (loc, concept_id)
+            time.sleep(opts.delay)
+            try:
+                raw = http_get(url).decode("utf-8", "replace")
+            except HttpError as e:
+                say("%s concept: %s" % (loc, e))
+                continue
+            except NetError as e:
+                say("%s concept: сеть: %s" % (loc, e))
+                net_failed = True
+                break
+            if debug:
+                opts.save_debug("%s_%s_concept.html" % (g["id"], loc), raw)
+            p = parse_page(raw, None)
+            ru = bool(p["desc"]) and is_russian(p["desc"])
+            say("%s concept %s: название=%r описание=%d симв. (%s) скриншотов=%d" % (
+                loc, concept_id, p["name"], len(p["desc"]), "рус" if ru else "не рус", len(p["shots"])))
+            if ru:
+                desc_raw, desc_name, lang = p["desc"], p["name"], "ru"
+                if p["shots"] and not shots:
+                    shots = p["shots"]
+                break
     if net_failed:
         return "neterr"
     if not got_page:
@@ -589,6 +634,10 @@ def main(argv=None):
     ap.add_argument("--delay", type=float, default=0.15, help="пауза перед запросом, сек (по умолч. 0.15)")
     ap.add_argument("--locales", default="en-us",
                     help="какие версии страницы пробовать по порядку (по умолч. en-us)")
+    ap.add_argument("--concept-locales", default="ru-ua",
+                    help="где искать русское описание по ID концепта (по умолч. ru-ua; пусто = не искать)")
+    ap.add_argument("--refetch-desc", action="store_true",
+                    help="для уже скачанных игр без русского описания попробовать получить русское")
     ap.add_argument("--retry-partial", action="store_true", help="повторить игры с неполными данными")
     ap.add_argument("--force", action="store_true", help="перекачать всё выбранное заново")
     ap.add_argument("--pack-only", action="store_true", help="не качать, только собрать pak из кэша")
@@ -597,6 +646,7 @@ def main(argv=None):
     opts = ap.parse_args(argv)
 
     opts.locales = [x.strip().lower() for x in opts.locales.split(",") if x.strip()]
+    opts.concept_locales = [x.strip().lower() for x in opts.concept_locales.split(",") if x.strip()]
     out_dir = Path(opts.out)
     cache_dir = out_dir / "cache"
     out_dir.mkdir(parents=True, exist_ok=True)

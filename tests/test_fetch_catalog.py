@@ -33,7 +33,7 @@ def make_page(product_id, name, desc_html, shots):
             "descriptions": [{"type": "SHORT", "value": "Коротко"}, {"type": "LONG", "value": desc_html}]}
     other = {"id": "OTHER-PRODUCT", "name": "Чужая игра", "media": [
         {"role": "SCREENSHOT", "type": "IMAGE", "url": "https://x/other.png"}]}
-    data = {"props": {"apolloState": {"Product:other": other, "Product:main": prod}}}
+    data = {"props": {"pageProps": {"productId": product_id}, "apolloState": {"Product:other": other, "Product:main": prod}}}
     return '<html><head></head><body><script id="__NEXT_DATA__" type="application/json">%s</script></body></html>' % json.dumps(data)
 
 
@@ -248,6 +248,51 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(fc.is_russian("Это описание игры на русском языке."))
         self.assertFalse(fc.is_russian("This is an English description."))
         self.assertFalse(fc.is_russian("Да"))
+
+    def _concept_setup(self):
+        cid = "EP0001-CUSA00003_00-GAME00000002"
+        href = "https://store.playstation.com/en-us/product/" + cid
+        shots = ["https://img/s2_%d.png" % k for k in range(1, 4)]
+        en = make_page(cid, "Game 2", "<p>Only English text exists here for the game.</p>", shots)
+        self.pages[href] = en + "<!-- Concept:555 -->"
+        self.concept_url = "https://store.playstation.com/ru-ua/concept/555"
+        self.pages[self.concept_url] = make_page("OTHER-REGION-ID", "Игра два", "<p>Это описание игры на русском языке.</p>", [])
+
+    def _read_pak_desc(self):
+        doc = json.loads((self.root / "data" / "catalog.json").read_text(encoding="utf-8"))
+        g = doc["games"][0]
+        pak = (self.root / "data" / "catalog.pak").read_bytes()
+        off, ln = g["d"]
+        return g, pak[off:off + ln].decode("utf-8")
+
+    def test_russian_via_concept_id(self):
+        self._concept_setup()
+        self.run_main("--ids", "CUSA00003", "--locales", "en-us")
+        g, desc = self._read_pak_desc()
+        self.assertEqual(desc, "Это описание игры на русском языке.")
+        self.assertEqual(g["r"], "Игра два")
+        self.assertEqual(len(g["s"]), 3)  # скриншоты остались с английской страницы
+        self.assertIn(self.concept_url, self.calls)
+
+    def test_concept_failure_keeps_english(self):
+        self._concept_setup()
+        del self.pages[self.concept_url]  # русской страницы нет (404)
+        self.run_main("--ids", "CUSA00003", "--locales", "en-us")
+        _, desc = self._read_pak_desc()
+        self.assertEqual(desc, "Only English text exists here for the game.")
+
+    def test_refetch_desc_upgrades_without_redownloading_images(self):
+        self._concept_setup()
+        self.run_main("--ids", "CUSA00003", "--locales", "en-us", "--concept-locales", "")
+        _, desc = self._read_pak_desc()
+        self.assertEqual(desc, "Only English text exists here for the game.")
+        img_calls = len([u for u in self.calls if u.startswith("https://img/")])
+        self.run_main("--ids", "CUSA00003", "--locales", "en-us")          # без --refetch-desc: пропуск
+        self.assertNotIn(self.concept_url, self.calls)
+        self.run_main("--ids", "CUSA00003", "--locales", "en-us", "--refetch-desc")
+        _, desc = self._read_pak_desc()
+        self.assertEqual(desc, "Это описание игры на русском языке.")
+        self.assertEqual(len([u for u in self.calls if u.startswith("https://img/")]), img_calls)
 
     def test_resume_skips_done(self):
         self.run_main("--no-pack")
