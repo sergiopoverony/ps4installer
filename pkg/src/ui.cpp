@@ -30,7 +30,8 @@ extern "C" int sceSystemServiceHideSplashScreen(void);
 #define FRAME_HEIGHT  1080
 #define FRAME_DEPTH      4
 
-static const int TITLE_PX = 44;   // название игры в карточке
+static const int TITLE_PX = 32;   // название игры в карточке (если не влезает - уменьшается, но не ниже TITLE_MIN_PX)
+static const int TITLE_MIN_PX = 16;
 static const int FONT_PX  = 30;   // крупно, чтобы читалось с дивана; подберём по телевизору
 static const int MARGIN_X = 40;
 static const int HEAD_H   = 90;
@@ -562,9 +563,15 @@ static void draw_info_top(const Game& g, int x, int y, int W)
     int maxc = rw / g_cellW;
     std::string en = g_selCat && !g_selCat->name_en.empty() ? g_selCat->name_en : g.title;
     // Название игры крупнее остального текста (шрифт моноширинный: ширина буквы растёт вместе с размером).
-    int bigCell = g_cellW * TITLE_PX / FONT_PX;
-    FT_Set_Pixel_Sizes(g_font, 0, TITLE_PX);
-    draw_text(fit_chars(en, rw / bigCell), rx, cy + TITLE_PX, C_TEXT, C_PANEL);
+    int px = TITLE_PX, cell = g_cellW, n = count_cp(en);
+    for (; px >= TITLE_MIN_PX; px--) {   // подбираем самый крупный размер, при котором название влезает целиком
+        FT_Set_Pixel_Sizes(g_font, 0, px);
+        cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : g_cellW * px / FONT_PX;
+        if (cell < 1) cell = 1;
+        if (n * cell <= rw) break;
+    }
+    if (px < TITLE_MIN_PX) { px = TITLE_MIN_PX; FT_Set_Pixel_Sizes(g_font, 0, px); }   // совсем длинное - обрежем с «…»
+    draw_text(fit_chars(en, rw / cell), rx, cy + TITLE_PX, C_TEXT, C_PANEL);
     FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
     if (g_selCat && !g_selCat->name_ru.empty() && g_selCat->name_ru != en)
         draw_text(fit_chars(g_selCat->name_ru, maxc), rx, cy + TITLE_PX + FONT_PX + 10, C_DIM, C_PANEL);
