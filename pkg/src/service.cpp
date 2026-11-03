@@ -95,6 +95,36 @@ bool service_installed(std::vector<std::string>& ids)
     return true;
 }
 
+bool service_installed_games(std::vector<std::pair<std::string, std::string> >& out)
+{
+    out.clear();
+    HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, "/installed_games", 5000);
+    if (!r.connected || r.status != 200) return false;
+    JsonValue j;
+    if (!json_parse(r.body, j) || !j["ok"].asBool()) return false;
+    const JsonValue& a = j["games"];
+    for (size_t i = 0; i < a.arr.size(); i++) out.push_back(std::make_pair(a.arr[i]["id"].asStr(), a.arr[i]["title"].asStr()));
+    return true;
+}
+
+bool service_app_icon(const std::string& titleId, std::string& png)
+{
+    HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, "/appicon?id=" + titleId, 4000);
+    if (!r.connected || r.status != 200 || r.body.size() < 16) return false;
+    png = r.body;
+    return true;
+}
+
+bool service_launch(const std::string& titleId, std::string& err)
+{
+    HttpResult r = http_post(SERVICE_HOST, SERVICE_PORT, "/launch", "{\"title_ids\":[" + json_quote(titleId) + "]}", 8000);
+    if (!r.connected) { err = "служба не отвечает"; return false; }
+    JsonValue j;
+    if (!json_parse(r.body, j)) { err = "http " + std::to_string(r.status); return false; }
+    if (!j["ok"].asBool()) { err = j["detail"].asStr(j["error"].asStr("error")); return false; }
+    return true;
+}
+
 bool service_install(const std::vector<std::string>& paths, std::string& err, std::vector<std::string>* skipped)
 {
     std::string body = "{\"paths\":[";

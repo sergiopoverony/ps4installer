@@ -138,6 +138,32 @@ static std::vector<CatImage> g_tileImg;   // картинки плиток (см
 static std::vector<char> g_tileTried;
 static std::string g_status;   // строка под сеткой
 
+// У каждой вкладки со списком своё состояние (игры, курсор, картинки). Активное лежит в g_games, g_cursor и т.д.;
+// при смене вкладки оно откладывается в g_lists, а нужное достаётся оттуда.
+struct ListState {
+    std::vector<Game> games;
+    int cursor = 0, topRow = 0;
+    std::vector<CatImage> img;
+    std::vector<char> tried;
+    LoadState load = LS_NONE;
+    std::string err;
+};
+static ListState g_lists[TAB_COUNT];
+static int g_listTab = TAB_AVAILABLE;
+
+static void switch_list(int newTab)
+{
+    if (newTab == g_listTab) return;
+    ListState& s = g_lists[g_listTab];
+    s.games.swap(g_games); s.img.swap(g_tileImg); s.tried.swap(g_tileTried);
+    std::swap(s.cursor, g_cursor); std::swap(s.topRow, g_topRow); std::swap(s.load, g_load); s.err.swap(g_loadErr);
+    ListState& n = g_lists[newTab];
+    n.games.swap(g_games); n.img.swap(g_tileImg); n.tried.swap(g_tileTried);
+    std::swap(n.cursor, g_cursor); std::swap(n.topRow, g_topRow); std::swap(n.load, g_load); n.err.swap(g_loadErr);
+    g_listTab = newTab;
+    if (newTab == TAB_INSTALLED) g_load = LS_NONE;   // каждый раз перечитываем: могло что-то установиться
+}
+
 // Окна: подтверждение установки и ход установки.
 enum Mode { MODE_GRID = 0, MODE_CONFIRM, MODE_PROGRESS };
 static Mode g_mode = MODE_GRID;
@@ -180,17 +206,18 @@ static uint64_t pending_bytes()
 static uint64_t g_lastPoll = 0;
 static bool g_freshScan = false;           // Квадрат: просим у службы свежее сканирование
 static int g_cardReason = 0;               // 0 - можно ставить; иначе почему кнопка установки неактивна
-enum { CARD_OK = 0, CARD_INSTALLED, CARD_INCOMPLETE, CARD_QUEUED };
+enum { CARD_OK = 0, CARD_INSTALLED, CARD_INCOMPLETE, CARD_QUEUED, CARD_LAUNCH };
 static bool g_skipConfirmInput = false;   // то же нажатие Креста, что открыло окно, не считается «Установить»
 
 static void mark_installed()
 {
     std::vector<std::string> ids;
     if (!service_installed(ids)) return;
-    for (size_t i = 0; i < g_games.size(); i++) {
-        g_games[i].installed = false;
+    std::vector<Game>& gs = (g_listTab == TAB_AVAILABLE) ? g_games : g_lists[TAB_AVAILABLE].games;
+    for (size_t i = 0; i < gs.size(); i++) {
+        gs[i].installed = false;
         for (size_t k = 0; k < ids.size(); k++)
-            if (!g_games[i].title_id.empty() && ids[k] == g_games[i].title_id) g_games[i].installed = true;
+            if (!gs[i].title_id.empty() && ids[k] == gs[i].title_id) gs[i].installed = true;
     }
 }
 
@@ -217,6 +244,45 @@ static void load_games(bool fresh = false)
     g_status.clear();
 }
 
+static std::string lower_ascii(std::string s)
+{
+    for (size_t i = 0; i < s.size(); i++) if (s[i] >= 'A' && s[i] <= 'Z') s[i] = (char)(s[i] - 'A' + 'a');
+    return s;
+}
+
+// Вкладка «Установленные игры»: список берём у службы, названия - из param.sfo, а если их нет - из каталога.
+static void load_installed()
+{
+    std::vector<std::pair<std::string, std::string> > list;
+    if (!service_installed_games(list)) {
+        g_load = LS_ERROR;
+        g_loadErr = "служба не отвечает";
+        g_games.clear();
+        return;
+    }
+    g_games.clear();
+    for (size_t i = 0; i < list.size(); i++) {
+        Game g;
+        g.title_id = list[i].first;
+        g.title = list[i].second;
+        if (g.title.empty()) {
+            const CatEntry* e = catalog_find(g.title_id, "");
+            g.title = e && !e->name_en.empty() ? e->name_en : g.title_id;
+        }
+        g.installed = true;
+        g.console = true;
+        g_games.push_back(g);
+    }
+    for (size_t a = 1; a < g_games.size(); a++)   // по алфавиту (латиница; остальное по коду символа)
+        for (size_t b = a; b > 0 && lower_ascii(g_games[b].title) < lower_ascii(g_games[b - 1].title); b--) std::swap(g_games[b], g_games[b - 1]);
+    g_tileImg.clear(); g_tileTried.clear();
+    if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
+    g_topRow = 0;
+    g_load = LS_OK;
+    g_loadErr.clear();
+    logf_("ui: установленных игр: %d", (int)g_games.size());
+}
+
 // ---------------------------------------------------------------- рисование
 
 static void blit(const CatImage& im, int x, int y);
@@ -225,6 +291,10 @@ static void blit(const CatImage& im, int x, int y);
 
 static bool load_game_image(const Game& g, int w, int h, CatImage& out)
 {
+    if (g.console) {   // у установленной игры берём её настоящую иконку (не проверено на консоли)
+        std::string png;
+        if (service_app_icon(g.title_id, png) && catalog_image_from_blob(png, w, h, out)) return true;
+    }
     const CatEntry* e = catalog_find(g.title_id, g.title);
     if (e && catalog_image(e->cover, w, h, out)) return true;
     std::string png;
@@ -292,13 +362,15 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
     }
 
     // Размер игры в углу картинки
-    std::string sz = fmt_size(g.size);
-    int szw = text_w(sz) + 12;
-    fill(x + TILE_W - szw, y + IMG_H - FONT_PX - 10, szw, FONT_PX + 10, C_BG);
-    draw_text(sz, x + TILE_W - szw + 6, y + IMG_H - 9, C_DIM, C_BG);
+    if (!g.console) {
+        std::string sz = fmt_size(g.size);
+        int szw = text_w(sz) + 12;
+        fill(x + TILE_W - szw, y + IMG_H - FONT_PX - 10, szw, FONT_PX + 10, C_BG);
+        draw_text(sz, x + TILE_W - szw + 6, y + IMG_H - 9, C_DIM, C_BG);
+    }
 
     // Уже установлена: полоса поверх картинки
-    if (g.installed) {
+    if (g.installed && !g.console) {
         std::string m = "УЖЕ УСТАНОВЛЕНО";
         int w = text_w(m) + 16;
         int mx = x + (TILE_W - w) / 2, my = y + IMG_H / 2 - (FONT_PX + 16) / 2;
@@ -325,7 +397,7 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
     if (g.patches) tags += "патч ";
     if (g.dlcs) tags += "DLC ";
     if (g.rus) tags += "рус ";
-    if (!tags.empty()) {
+    if (!tags.empty() && !g.console) {
         int w = text_w(tags) + 12;
         fill(x, y, w, FONT_PX + 10, C_BG);
         draw_text(tags, x + 6, y + FONT_PX + 1, C_WARN, C_BG);
@@ -368,8 +440,13 @@ static void draw_available()
         return;
     }
     if (g_games.empty()) {
-        draw_text("Игр не найдено.", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
-        draw_text("Подключите флешку или диск с играми и нажмите Квадрат.", MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
+        if (g_tab == TAB_INSTALLED) {
+            draw_text("Установленных игр не найдено.", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
+            draw_text("Нажмите Квадрат, чтобы обновить список.", MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
+        } else {
+            draw_text("Игр не найдено.", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
+            draw_text("Подключите флешку или диск с играми и нажмите Квадрат.", MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
+        }
         return;
     }
     int gapX = (FRAME_WIDTH - 2 * MARGIN_X - COLS * TILE_W) / (COLS - 1);
@@ -503,6 +580,13 @@ static void draw_confirm()
     draw_info_top(g_sel, x, y, W);
     int tx = x + 40, ty = y + 30 + COVER_H + 50;
     int maxc = (W - 80) / g_cellW;
+
+    if (g_cardReason == CARD_LAUNCH) {   // окно установленной игры: только запуск
+        if (!g_confirmErr.empty()) draw_text(fit_chars(g_confirmErr, maxc), tx, y + H - 130 + 36, C_WARN, C_PANEL);
+        std::string h = "Крест - запустить игру      Круг - закрыть";
+        draw_text(h, x + (W - text_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
+        return;
+    }
 
     // Только главное: сколько нужно и сколько свободно.
     draw_text("Нужно места: " + fmt_size(g_selNeed), tx, ty, C_TEXT, C_PANEL);
@@ -645,7 +729,7 @@ static void draw_all()
 
     if (g_svc != SVC_OK) {
         draw_service_message();
-    } else if (g_tab == TAB_AVAILABLE) {
+    } else if (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED) {
         draw_available();
     } else {
         std::string body = std::string("Здесь будет вкладка «") + TAB_NAMES[g_tab] + "»";
@@ -664,7 +748,9 @@ static void draw_all()
 
     // Нижняя строка
     const char* hint = "L1 / R1 - вкладки";
-    if (g_tab == TAB_AVAILABLE && g_mode == MODE_GRID)
+    if (g_tab == TAB_INSTALLED && g_mode == MODE_GRID)
+        hint = "Стрелки / стик - выбор    Крест - открыть    Квадрат - обновить    L1 / R1 - вкладки";
+    else if (g_tab == TAB_AVAILABLE && g_mode == MODE_GRID)
         hint = g_instActive ? "Стрелки / стик - выбор    Крест - в очередь    Треугольник - ход установки    Квадрат - обновить    L1 / R1 - вкладки"
                             : "Стрелки / стик - выбор    Крест - установить    Квадрат - обновить    L1 / R1 - вкладки";
     else if (g_mode != MODE_GRID) hint = "";
@@ -766,7 +852,7 @@ void ui_pump()
         if (pressed & ORBIS_PAD_BUTTON_L1) g_tab = (g_tab + TAB_COUNT - 1) % TAB_COUNT;
         if (pressed & ORBIS_PAD_BUTTON_R1) g_tab = (g_tab + 1) % TAB_COUNT;
     }
-    if (g_tab != old) g_redraw = 2;
+    if (g_tab != old) { switch_list(g_tab); g_redraw = 2; }
 
     // Опрос хода установки (раз в секунду), пока она идёт.
     if (g_instActive && now - g_lastPoll >= 1000000) {
@@ -790,10 +876,12 @@ void ui_pump()
         g_svcDrawn = false;
         g_redraw = 2;
     }
-    if (g_svc == SVC_OK && g_tab == TAB_AVAILABLE) {
-        if ((first || (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_SQUARE))) && g_load != LS_LOADING) {
-            g_freshScan = !first;
-            first = false;
+    if (g_svc == SVC_OK && (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED)) {
+        bool isAvail = g_tab == TAB_AVAILABLE;
+        bool wantLoad = (isAvail ? first : g_load == LS_NONE) || (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_SQUARE));
+        if (wantLoad && g_load != LS_LOADING) {
+            g_freshScan = isAvail && !first;
+            if (isAvail) first = false;
             g_load = LS_LOADING;
             g_redraw = 2;
         }
@@ -805,7 +893,16 @@ void ui_pump()
                 g_mode = MODE_PROGRESS;
                 g_redraw = 2;
             }
-            if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
+            if (g_mode == MODE_GRID && g_tab == TAB_INSTALLED && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
+                g_sel = g_games[(size_t)g_cursor];
+                g_cardReason = CARD_LAUNCH;
+                g_confirmErr.clear();
+                info_load(g_sel);
+                g_mode = MODE_CONFIRM;
+                g_skipConfirmInput = true;
+                logf_("ui: окно установленной игры: %s (%s)", g_sel.title.c_str(), g_sel.title_id.c_str());
+                g_redraw = 2;
+            } else if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
                 // Карточка открывается для любой игры; если ставить нельзя, неактивна только кнопка установки.
                 g_sel = g_games[(size_t)g_cursor];
                 g_cardReason = g_sel.installed ? CARD_INSTALLED : g_sel.incomplete ? CARD_INCOMPLETE
@@ -837,6 +934,13 @@ void ui_pump()
         unsigned cp = g_skipConfirmInput ? 0 : pressed;
         g_skipConfirmInput = false;
         if (cp & ORBIS_PAD_BUTTON_CIRCLE) { info_clear(); g_mode = MODE_GRID; g_redraw = 2; }
+        else if ((cp & ORBIS_PAD_BUTTON_CROSS) && g_cardReason == CARD_LAUNCH) {
+            std::string err;
+            logf_("ui: запуск игры %s", g_sel.title_id.c_str());
+            if (service_launch(g_sel.title_id, err)) g_confirmErr = "Запускаю игру...";
+            else { g_confirmErr = "Не удалось запустить: " + err; logf_("ui: запуск не удался: %s", err.c_str()); }
+            g_redraw = 2;
+        }
         else if ((cp & ORBIS_PAD_BUTTON_TRIANGLE) && g_cardReason == CARD_QUEUED) { info_clear(); g_mode = MODE_PROGRESS; g_redraw = 2; }
         else if ((cp & ORBIS_PAD_BUTTON_CROSS) && !low && g_cardReason == CARD_OK) {
             std::vector<std::string> paths;
@@ -869,7 +973,7 @@ void ui_pump()
         }
     }
 
-    if (g_redraw == 0 && g_svc == SVC_OK && g_tab == TAB_AVAILABLE && g_mode == MODE_GRID && g_load == LS_OK &&
+    if (g_redraw == 0 && g_svc == SVC_OK && (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED) && g_mode == MODE_GRID && g_load == LS_OK &&
         tile_images_step())
         g_redraw = 2;
 
@@ -927,7 +1031,8 @@ void ui_pump()
 
     // Загрузка списка: сначала на экране показывается «Загрузка...», потом (после показа кадра) идёт запрос.
     if (drew && g_load == LS_LOADING && g_redraw == 1) {
-        load_games(g_freshScan);
+        if (g_tab == TAB_INSTALLED) load_installed();
+        else load_games(g_freshScan);
         g_freshScan = false;
         g_redraw = 2;
     }

@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Служба ps4installerd (payload) живёт отдельно от приложения; приложение говорит с ней по HTTP.
@@ -38,6 +39,12 @@ bool service_free(uint64_t& bytes);
 // Иконка игры (icon0.png) из PKG через службу (GET /icon). false, если её нет.
 bool service_icon(const std::string& pkgPath, std::string& png);
 bool service_installed(std::vector<std::string>& ids);   // title_id установленных игр
+// Установленные игры с названиями (GET /installed_games): пары (title_id, название; название может быть пустым).
+bool service_installed_games(std::vector<std::pair<std::string, std::string> >& out);
+// Иконка установленной игры (GET /appicon). false, если её нет.
+bool service_app_icon(const std::string& titleId, std::string& png);
+// POST /launch: запуск установленной игры. В err причина отказа.
+bool service_launch(const std::string& titleId, std::string& err);
 
 // POST /install. true, если служба приняла очередь. При отказе в err текст причины (detail службы).
 // skipped: что служба решила не ставить (backport, старые патчи) и почему.
