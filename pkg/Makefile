@@ -19,13 +19,13 @@ EXTRAFLAGS  := -O2
 # Версия приложения = версия службы (из ../src/version.h).
 APPVER      := $(shell sed -n 's/.*APP_VERSION "\(.*\)".*/\1/p' ../src/version.h)
 
-ASSETS      := assets/fonts/DejaVuSansMono.ttf assets/fonts/LICENSE-DejaVu.txt assets/misc/ps4installerd.elf
-
-# Каталог игр (data/catalog.pak + data/catalog.json, делает tools/fetch_catalog.py). Если его нет -
-# в PKG кладётся пустой каталог: приложение работает, но без обложек и описаний.
+# Порядок важен: create-gp4 собирает папки по списку файлов, и список должен идти по алфавиту папок
+# (data, fonts, misc). Каталог игр (data/catalog.pak + data/catalog.json, делает tools/fetch_catalog.py);
+# если его нет, в PKG он не кладётся: приложение работает, но без обложек и описаний.
 ifneq ($(wildcard ../data/catalog.pak),)
-ASSETS += assets/data/catalog.pak assets/data/catalog.json
+ASSETS      := assets/data/catalog.json assets/data/catalog.pak
 endif
+ASSETS      += assets/fonts/DejaVuSansMono.ttf assets/fonts/LICENSE-DejaVu.txt assets/misc/ps4installerd.elf
 
 # Системные модули для приложения (без libc.prx приложение сразу вылетает). Берутся из набора OpenOrbis.
 LIBMODULES  := sce_module/libc.prx sce_module/libSceFios2.prx
