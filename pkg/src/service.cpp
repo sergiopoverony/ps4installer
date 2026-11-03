@@ -69,6 +69,18 @@ bool service_free(uint64_t& bytes)
     return true;
 }
 
+bool service_installed(std::vector<std::string>& ids)
+{
+    ids.clear();
+    HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, "/installed", 3000);
+    if (!r.connected || r.status != 200) return false;
+    JsonValue j;
+    if (!json_parse(r.body, j) || !j["ok"].asBool()) return false;
+    const JsonValue& a = j["title_ids"];
+    for (size_t i = 0; i < a.arr.size(); i++) ids.push_back(a.arr[i].asStr());
+    return true;
+}
+
 bool service_install(const std::vector<std::string>& paths, std::string& err, std::vector<std::string>* skipped)
 {
     std::string body = "{\"paths\":[";

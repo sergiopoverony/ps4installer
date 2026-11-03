@@ -35,6 +35,7 @@ int service_fw_major();
 
 // Свободное место на диске консоли (GET /free).
 bool service_free(uint64_t& bytes);
+bool service_installed(std::vector<std::string>& ids);   // title_id установленных игр
 
 // POST /install. true, если служба приняла очередь. При отказе в err текст причины (detail службы).
 // skipped: что служба решила не ставить (backport, старые патчи) и почему.

@@ -94,6 +94,13 @@ Response route(const Request& rq) {
         r.body = std::string("{\"ok\":") + (ok ? "true" : "false") + ",\"free_bytes\":" + std::to_string((unsigned long long)b) + "}";
         return r;
     }
+    if (rq.path == "/installed") {
+        std::vector<std::string> ids = platform::installed_title_ids();
+        r.body = "{\"ok\":true,\"title_ids\":[";
+        for (size_t i = 0; i < ids.size(); i++) r.body += (i ? ",\"" : "\"") + json_escape(ids[i]) + "\"";
+        r.body += "]}";
+        return r;
+    }
     if (rq.path == "/status") {
         r.body = installer::status_json();
         return r;

@@ -1,3 +1,5 @@
+#include <dirent.h>
+#include <cctype>
 #include "platform.h"
 
 #include <cstdio>
@@ -35,6 +37,19 @@ static std::map<std::string, int> g_fake_busy;
 
 void notify(const std::string& msg) { log_printf("NOTIFY: %s", msg.c_str()); }
 void notify_icon(const std::string& msg, const std::string& icon_uri) { log_printf("NOTIFY: %s [icon %s]", msg.c_str(), icon_uri.c_str()); }
+std::vector<std::string> installed_title_ids() {
+    std::vector<std::string> out;
+    const char* env = getenv("FAKE_INSTALLED");
+    std::string s = env ? env : "";
+    size_t i = 0;
+    while (i < s.size()) {
+        size_t k = s.find(',', i);
+        if (k == std::string::npos) k = s.size();
+        if (k > i) out.push_back(s.substr(i, k - i));
+        i = k + 1;
+    }
+    return out;
+}
 void power_tick() {}
 
 bool free_bytes(const char* path, uint64_t* out) {
@@ -216,6 +231,18 @@ void notify_icon(const std::string& msg, const std::string& icon_uri) {
     snprintf(req.message, sizeof(req.message), "%s", msg.c_str());
     snprintf(req.iconUri, sizeof(req.iconUri), "%s", icon_uri.c_str());
     sceKernelSendNotificationRequest(0, &req, sizeof(req), 0);
+}
+
+std::vector<std::string> installed_title_ids() {
+    std::vector<std::string> out;
+    DIR* d = opendir("/user/app");
+    if (!d) return out;
+    while (struct dirent* e = readdir(d)) {
+        std::string n = e->d_name;
+        if (n.size() == 9 && isalpha((unsigned char)n[0])) out.push_back(n);
+    }
+    closedir(d);
+    return out;
 }
 
 void power_tick() { sceSystemServicePowerTick(); }

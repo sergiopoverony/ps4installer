@@ -149,12 +149,24 @@ static InstallStatus g_inst;
 static std::string g_instTitle;
 static uint64_t g_lastPoll = 0;
 
+static void mark_installed()
+{
+    std::vector<std::string> ids;
+    if (!service_installed(ids)) return;
+    for (size_t i = 0; i < g_games.size(); i++) {
+        g_games[i].installed = false;
+        for (size_t k = 0; k < ids.size(); k++)
+            if (!g_games[i].title_id.empty() && ids[k] == g_games[i].title_id) g_games[i].installed = true;
+    }
+}
+
 static void load_games()
 {
     std::vector<PkgItem> items;
     std::string err;
     if (service_scan(items, err)) {
         build_games(items, g_games);
+        mark_installed();
         if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
         g_topRow = 0;
         g_load = LS_OK;
@@ -193,6 +205,15 @@ static void draw_tile(int x, int y, const Game& g, bool selected)
     int szw = text_w(sz) + 12;
     fill(x + TILE_W - szw, y + IMG_H - FONT_PX - 10, szw, FONT_PX + 10, C_BG);
     draw_text(sz, x + TILE_W - szw + 6, y + IMG_H - 9, C_DIM, C_BG);
+
+    // Уже установлена: полоса поверх картинки
+    if (g.installed) {
+        std::string m = "УЖЕ УСТАНОВЛЕНА";
+        int w = text_w(m) + 16;
+        int mx = x + (TILE_W - w) / 2, my = y + IMG_H / 2 - (FONT_PX + 16) / 2;
+        fill(mx, my, w, FONT_PX + 16, C_GREEN);
+        draw_text(m, mx + 8, my + FONT_PX + 4, C_BG, C_GREEN);
+    }
 
     // Пометки: патч / DLC / русификатор
     std::string tags;
@@ -548,6 +569,7 @@ void ui_pump()
             if (!st.running && !st.jobs.empty()) {
                 g_instActive = false;
                 g_instFinished = true;
+                mark_installed();
                 logf_("ui: установка завершена (%d файлов)", (int)st.jobs.size());
             }
             g_redraw = 2;
@@ -573,6 +595,8 @@ void ui_pump()
             if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
                 if (g_instActive || g_instFinished) {            // уже есть установка: показываем её ход
                     g_mode = MODE_PROGRESS;
+                } else if (g_games[(size_t)g_cursor].installed) {
+                    // уже установлена: второй раз не ставим
                 } else {
                     g_sel = g_games[(size_t)g_cursor];
                     g_selFiles = install_files(g_sel, service_fw_major());

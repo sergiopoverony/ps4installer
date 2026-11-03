@@ -286,6 +286,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(j["need"], 0x10000)
         self.assertEqual(j["free"], 1000)
         self.assertEqual(self.srv.get("/free")[1]["free_bytes"], 1000)
+        self.assertEqual(self.srv.get("/installed")[1]["title_ids"], [])
         self.assertEqual(self.srv.get("/status")[1]["jobs"], [])
 
     def test_failure_does_not_stop_queue_and_already_installed(self):

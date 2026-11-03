@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 // Всё, что зависит от консоли. На консоли (payload SDK) вызывает системные функции,
 // при сборке с -DHOST_TEST заменено заглушками, чтобы логику можно было проверять на ПК.
@@ -10,6 +11,8 @@ namespace platform {
 void notify(const std::string& msg);  // всплывающее уведомление на экране консоли
 // Уведомление с иконкой (icon_uri: путь к картинке или адрес вида cxml://...; пусто - без иконки).
 void notify_icon(const std::string& msg, const std::string& icon_uri);
+// Title ID установленных игр (папки в /user/app). На ПК: переменная FAKE_INSTALLED="A,B".
+std::vector<std::string> installed_title_ids();
 void power_tick();                    // не давать консоли уйти в сон на время установки
 bool free_bytes(const char* path, uint64_t* out);
 

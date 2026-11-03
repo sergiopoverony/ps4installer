@@ -10,6 +10,7 @@ struct Game {
     std::string title, title_id, path;
     uint64_t size = 0;
     int patches = 0, dlcs = 0, rus = 0;
+    bool installed = false;       // уже стоит на консоли
     std::vector<PkgItem> files;   // все файлы этой игры (сама игра, патчи, DLC, русификаторы)
 };
 
