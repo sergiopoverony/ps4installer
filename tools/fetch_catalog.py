@@ -192,6 +192,7 @@ def pick_sample(games, limit):
 _JSON_SCRIPT_RE = re.compile(r'<script[^>]*(?:type="application/json"|id="__NEXT_DATA__")[^>]*>(.*?)</script>', re.S)
 _OVERVIEW_RE = re.compile(r'data-qa="mfe-game-overview#description"[^>]*>(.*?)</p>', re.S)
 _META_RE = r'<meta[^>]+(?:property|name)="%s"[^>]+content="([^"]*)"'
+_NOTICE_RE = re.compile(r'"type":"COMPATIBILITY_NOTICE","value":"((?:[^"\\]|\\.)*)"')
 
 
 def html_to_text(s):
@@ -279,7 +280,14 @@ def _desc_from_product(p, state):
 
 def parse_page(page_html, product_id=None):
     """Возвращает {'name','desc','shots','diag'}. diag - список строк для --debug."""
-    res = {"name": "", "desc": "", "shots": [], "diag": [], "concept": ""}
+    res = {"name": "", "desc": "", "shots": [], "diag": [], "concept": "", "notice": ""}
+    mn = _NOTICE_RE.search(page_html)  # строка про режимы: "1 players", "Online play required" и т.п.
+    if mn:
+        try:
+            raw_notice = json.loads('"%s"' % mn.group(1))
+        except ValueError:
+            raw_notice = mn.group(1)
+        res["notice"] = " | ".join(x.strip() for x in re.split(r"<br\s*/?>", raw_notice) if x.strip())
     mc = re.search(r"Concept:(\d+)", page_html)  # ID концепта один на все регионы магазина
     if mc:
         res["concept"] = mc.group(1)
@@ -432,7 +440,37 @@ def _has_cyrillic(s):
     return bool(re.search(r"[Ѐ-ӿ]", s))
 
 
+def refetch_notice(g, cache_dir, opts):
+    """Добор строки про режимы игры (один заход на страницу en-us, картинки не трогаются).
+    Пишет meta['notice'] (пустая строка = на странице такой строки нет)."""
+    meta_path = cache_dir / g["id"] / "meta.json"
+    if not meta_path.exists():
+        return "skip"
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except ValueError:
+        return "skip"
+    if "notice" in meta and not opts.force:
+        return "skip"
+    url = re.sub(r"/[a-z]{2}-[a-z]{2}/", "/%s/" % (opts.locales[0] if opts.locales else "en-us"),
+                 g["href"], count=1)
+    time.sleep(opts.delay)
+    try:
+        raw = http_get(url).decode("utf-8", "replace")
+    except HttpError:
+        meta["notice"] = ""
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        return "nopage"
+    except NetError:
+        return "neterr"
+    meta["notice"] = parse_page(raw, g["cid"])["notice"]
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+    return "ok" if meta["notice"] else "empty"
+
+
 def process_game(g, cache_dir, opts):
+    if opts.refetch_notice:
+        return refetch_notice(g, cache_dir, opts)
     d = cache_dir / g["id"]
     meta_path = d / "meta.json"
     if meta_path.exists() and not opts.force:
@@ -465,6 +503,7 @@ def process_game(g, cache_dir, opts):
     desc_name = ""
     shots = []
     concept_id = ""
+    notice = ""
     product_id = g["cid"]
     # 1) страницы по очереди (ru-ru, ru-ua, en-us). Русское описание берём с первой страницы, где оно
     #    действительно на русском (магазин может отдать английский текст на русской странице);
@@ -492,6 +531,8 @@ def process_game(g, cache_dir, opts):
             loc, p["name"], len(p["desc"]), "рус" if ru else "не рус", len(p["shots"])))
         if p["concept"] and not concept_id:
             concept_id = p["concept"]
+        if p["notice"] and not notice:
+            notice = p["notice"]
         if p["shots"] and not shots:
             shots = p["shots"]
         if p["desc"]:
@@ -571,7 +612,7 @@ def process_game(g, cache_dir, opts):
             name_ru = cand
     status = "ok" if (cover_ok and desc and n_shots >= 1) else "partial"
     meta = {"status": status, "lang": lang, "name_ru": name_ru, "shots": n_shots,
-            "has_desc": bool(desc), "has_cover": cover_ok}
+            "has_desc": bool(desc), "has_cover": cover_ok, "notice": notice}
     meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     return status
 
@@ -651,6 +692,8 @@ def main(argv=None):
                     help="где искать русское описание по ID концепта (по умолч. ru-ua; пусто = не искать)")
     ap.add_argument("--refetch-desc", action="store_true",
                     help="для уже скачанных игр без русского описания попробовать получить русское")
+    ap.add_argument("--refetch-notice", action="store_true",
+                    help="только добрать у скачанных игр строку про режимы (одиночная/сетевая), картинки не трогать")
     ap.add_argument("--retry-partial", action="store_true", help="повторить игры с неполными данными")
     ap.add_argument("--force", action="store_true", help="перекачать всё выбранное заново")
     ap.add_argument("--pack-only", action="store_true", help="не качать, только собрать pak из кэша")

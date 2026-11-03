@@ -324,5 +324,21 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue((self.root / "data" / "cache" / "CUSA00003" / "meta.json").exists())
 
 
+
+class NoticeTest(unittest.TestCase):
+    def test_parse_notice(self):
+        h = 'x "type":"COMPATIBILITY_NOTICE","value":"Online play required<br/>1 players<br/>PS4 Pro Enhanced" y'
+        self.assertEqual(fc.parse_page(h, None)["notice"],
+                         "Online play required | 1 players | PS4 Pro Enhanced")
+
+    def test_no_notice(self):
+        self.assertEqual(fc.parse_page("<html></html>", None)["notice"], "")
+
+    def test_classify(self):
+        import online_report as orp
+        self.assertEqual(orp.classify("Online play required | Online players 2-100"), "online_only")
+        self.assertEqual(orp.classify("Online play required | 1 players"), "has_offline")
+        self.assertEqual(orp.classify(""), "unknown")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
