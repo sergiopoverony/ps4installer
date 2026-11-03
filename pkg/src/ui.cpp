@@ -43,6 +43,11 @@ static const Color C_LOGO   = { 60,  66,  84 };
 static const Color C_TILE   = { 34,  38,  48 };
 static const Color C_TILE_SEL = { 52, 60,  82 };
 static const Color C_WARN   = { 235, 180,  80 };
+static const Color C_EDGE   = { 90, 110, 170 };
+static const Color C_PANEL  = { 40,  44,  56 };
+static const Color C_RED_BG = { 170,  40,  40 };
+static const Color C_GREEN  = { 110, 210, 130 };
+static const Color C_BAR_BG = { 24,  26,  34 };
 
 // Сетка игр: 5 колонок, 2 ряда на экране; ниже - прокрутка по рядам.
 static const int COLS = 5, ROWS_VIS = 2;
@@ -99,6 +104,16 @@ static void draw_text(const std::string& s, int x, int baseline, Color fg, Color
     }
 }
 
+// Обрезает строку до maxChars символов (не байтов) и добавляет «…».
+static std::string fit_chars(const std::string& s, int maxChars)
+{
+    if (count_cp(s) <= maxChars) return s;
+    const unsigned char* start = (const unsigned char*)s.c_str();
+    const unsigned char* p = start;
+    for (int i = 0; i < maxChars - 1; i++) decode_utf8(p);
+    return std::string((const char*)start, (size_t)(p - start)) + "\xE2\x80\xA6";
+}
+
 // Ширина текста в пикселях (шрифт моноширинный: все символы одной ширины).
 static int text_w(const std::string& s) { return count_cp(s) * g_cellW; }
 
@@ -119,6 +134,20 @@ static std::vector<Game> g_games;
 static int g_cursor = 0;
 static int g_topRow = 0;
 static std::string g_status;   // строка под сеткой
+
+// Окна: подтверждение установки и ход установки.
+enum Mode { MODE_GRID = 0, MODE_CONFIRM, MODE_PROGRESS };
+static Mode g_mode = MODE_GRID;
+static Game g_sel;                         // выбранная игра
+static std::vector<PkgItem> g_selFiles;    // что будет установлено (по порядку)
+static uint64_t g_selNeed = 0, g_freeBytes = 0;
+static bool g_freeOk = false;
+static std::string g_confirmErr;           // отказ службы при запуске установки
+static bool g_instActive = false;          // установка идёт (опрашиваем /status)
+static bool g_instFinished = false;        // закончилась (успешно или с ошибкой), окно ещё не закрыто
+static InstallStatus g_inst;
+static std::string g_instTitle;
+static uint64_t g_lastPoll = 0;
 
 static void load_games()
 {
@@ -229,7 +258,137 @@ static void draw_available()
     char pg[96];
     snprintf(pg, sizeof(pg), "Игра %d из %d   ряд %d из %d", g_cursor + 1, (int)g_games.size(), g_cursor / COLS + 1, rows);
     draw_text(pg, MARGIN_X, FRAME_HEIGHT - 90, C_DIM, C_BG);
-    if (!g_status.empty()) draw_text(g_status, MARGIN_X + 520, FRAME_HEIGHT - 90, C_TEXT, C_BG);
+}
+
+static void draw_panel(int x, int y, int w, int h)
+{
+    fill(x - 4, y - 4, w + 8, h + 8, C_EDGE);
+    fill(x, y, w, h, C_PANEL);
+}
+
+static void draw_bar(int x, int y, int w, int h, int pct, Color c)
+{
+    fill(x, y, w, h, C_BAR_BG);
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    fill(x, y, w * pct / 100, h, c);
+}
+
+static std::string job_label(const InstallJob& j)
+{
+    for (size_t i = 0; i < g_selFiles.size(); i++)
+        if (g_selFiles[i].path == j.path) return file_label(g_selFiles[i]);
+    return j.kind;
+}
+
+static void draw_confirm()
+{
+    const int W = 1300, H = 700;
+    int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + 40;
+    draw_panel(x, y, W, H);
+    int tx = x + 40, ty = y + 56;
+    int maxc = (W - 80) / g_cellW;
+    std::vector<std::string> t = wrap_lines(g_sel.title, maxc, 2);
+    for (size_t i = 0; i < t.size(); i++) draw_text(t[i], tx, ty + (int)i * (FONT_PX + 6), C_TEXT, C_PANEL);
+    ty += (int)t.size() * (FONT_PX + 6) + 20;
+
+    draw_text("Будет установлено:", tx, ty, C_DIM, C_PANEL);
+    ty += FONT_PX + 12;
+    int maxRows = 8;
+    for (size_t i = 0; i < g_selFiles.size() && (int)i < maxRows; i++) {
+        std::string lab = fit_chars(file_label(g_selFiles[i]), maxc - 14);
+        std::string sz = fmt_size(g_selFiles[i].size);
+        draw_text(lab, tx + 20, ty, C_TEXT, C_PANEL);
+        draw_text(sz, x + W - 40 - text_w(sz), ty, C_DIM, C_PANEL);
+        ty += FONT_PX + 8;
+    }
+    if ((int)g_selFiles.size() > maxRows) {
+        draw_text("... и ещё " + std::to_string(g_selFiles.size() - maxRows), tx + 20, ty, C_DIM, C_PANEL);
+        ty += FONT_PX + 8;
+    }
+    ty += 14;
+    draw_text("Всего нужно: " + fmt_size(g_selNeed), tx, ty, C_TEXT, C_PANEL);
+    ty += FONT_PX + 10;
+    if (g_freeOk) draw_text("Свободно на консоли: " + fmt_size(g_freeBytes), tx, ty, C_TEXT, C_PANEL);
+    else draw_text("Свободное место узнать не удалось", tx, ty, C_WARN, C_PANEL);
+
+    bool low = g_freeOk && g_selNeed > g_freeBytes;
+    int by = y + H - 130;
+    if (low) {
+        fill(tx, by, W - 80, 52, C_RED_BG);
+        std::string msg = "МАЛО МЕСТА - УДАЛИТЕ НЕНУЖНУЮ ИГРУ";
+        draw_text(msg, x + (W - text_w(msg)) / 2, by + 36, C_TEXT, C_RED_BG);
+    } else if (!g_confirmErr.empty()) {
+        draw_text(fit_chars(g_confirmErr, maxc), tx, by + 36, C_WARN, C_PANEL);
+    }
+    std::string hint = low ? "Круг - закрыть" : "Крест - установить      Круг - закрыть";
+    draw_text(hint, x + (W - text_w(hint)) / 2, y + H - 36, low ? C_DIM : C_TEXT, C_PANEL);
+}
+
+static int overall_pct()
+{
+    uint64_t total = 0, done = 0;
+    for (size_t i = 0; i < g_inst.jobs.size(); i++) {
+        const InstallJob& j = g_inst.jobs[i];
+        total += j.size;
+        if (j.status == "done" || j.status == "already_installed") done += j.size;
+        else if (j.status == "installing" && j.length > 0) done += (uint64_t)((double)j.size * (double)j.transferred / (double)j.length);
+    }
+    return total ? (int)(done * 100 / total) : 0;
+}
+
+static void draw_progress()
+{
+    const int W = 1300, H = 700;
+    int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + 40;
+    draw_panel(x, y, W, H);
+    int tx = x + 40, ty = y + 56;
+    int maxc = (W - 80) / g_cellW;
+    draw_text(fit_chars(g_instTitle, maxc), tx, ty, C_TEXT, C_PANEL);
+    ty += FONT_PX + 24;
+
+    bool failed = false;
+    for (size_t i = 0; i < g_inst.jobs.size(); i++)
+        if (g_inst.jobs[i].status == "failed") failed = true;
+    int pct = overall_pct();
+    if (g_instFinished) pct = failed ? pct : 100;
+    draw_bar(tx, ty, W - 80, 36, pct, failed ? C_WARN : C_GREEN);
+    char pc[16];
+    snprintf(pc, sizeof(pc), "%d%%", pct);
+    draw_text(pc, x + W / 2 - text_w(pc) / 2, ty + 28, C_TEXT, C_BAR_BG);
+    ty += 36 + 40;
+
+    for (size_t i = 0; i < g_inst.jobs.size() && i < 9; i++) {
+        const InstallJob& j = g_inst.jobs[i];
+        std::string st, label = job_label(j);
+        Color col = C_DIM;
+        bool dimLabel = true;
+        if (j.status == "done") { st = "готово"; col = C_GREEN; }
+        else if (j.status == "already_installed") { st = "уже установлено"; col = C_GREEN; }
+        else if (j.status == "installing") {
+            int p = j.length > 0 ? (int)(j.transferred * 100 / j.length) : 0;
+            st = std::to_string(p) + "%";
+            col = C_TEXT; dimLabel = false;
+        }
+        else if (j.status == "registering") { st = "подготовка"; col = C_TEXT; dimLabel = false; }
+        else if (j.status == "failed") { st = "ошибка"; col = C_WARN; }
+        else if (j.status == "cancelled") { st = "отменено"; }
+        else st = "ожидает";
+        draw_text(fit_chars(label, maxc - 24), tx + 20, ty, dimLabel ? C_DIM : C_TEXT, C_PANEL);
+        draw_text(st, x + W - 40 - text_w(st), ty, col, C_PANEL);
+        ty += FONT_PX + 10;
+    }
+    int by = y + H - 130;
+    if (g_instFinished && failed) {
+        std::string m;
+        for (size_t i = 0; i < g_inst.jobs.size(); i++)
+            if (g_inst.jobs[i].status == "failed") { m = g_inst.jobs[i].message; break; }
+        draw_text(fit_chars("Ошибка: " + m, maxc), tx, by + 36, C_WARN, C_PANEL);
+    } else if (g_instFinished) {
+        draw_text("Готово! Игра установлена, ищите её на главном экране консоли.", tx, by + 36, C_GREEN, C_PANEL);
+    }
+    std::string hint = g_instFinished ? "Круг - закрыть" : "Круг - скрыть окно (установка продолжится)";
+    draw_text(hint, x + (W - text_w(hint)) / 2, y + H - 36, C_TEXT, C_PANEL);
 }
 
 static void draw_all()
@@ -266,10 +425,23 @@ static void draw_all()
         draw_text(body, MARGIN_X, HEAD_H + 120, C_TEXT, C_BG);
     }
 
+    if (g_svc == SVC_OK && g_mode == MODE_CONFIRM) draw_confirm();
+    if (g_svc == SVC_OK && g_mode == MODE_PROGRESS) draw_progress();
+
+    // Идёт установка, а окно скрыто: короткая строка под сеткой
+    if (g_instActive && g_mode == MODE_GRID) {
+        char b[160];
+        snprintf(b, sizeof(b), "Идёт установка: %d%%", overall_pct());
+        draw_text(fit_chars(g_instTitle, 40) + " - " + b, MARGIN_X + 480, FRAME_HEIGHT - 90, C_GREEN, C_BG);
+    }
+
     // Нижняя строка
-    draw_text(g_tab == TAB_AVAILABLE ? "Стрелки / стик - выбор    Крест - установить (скоро)    Квадрат - обновить    L1 / R1 - вкладки"
-                                     : "L1 / R1 - вкладки",
-              MARGIN_X, FRAME_HEIGHT - 40, C_DIM, C_BG);
+    const char* hint = "L1 / R1 - вкладки";
+    if (g_tab == TAB_AVAILABLE && g_mode == MODE_GRID)
+        hint = g_instActive ? "Стрелки / стик - выбор    Крест - ход установки    Квадрат - обновить    L1 / R1 - вкладки"
+                            : "Стрелки / стик - выбор    Крест - установить    Квадрат - обновить    L1 / R1 - вкладки";
+    else if (g_mode != MODE_GRID) hint = "";
+    draw_text(hint, MARGIN_X, FRAME_HEIGHT - 40, C_DIM, C_BG);
     std::string ver = std::string("версия ") + APP_VERSION;
     draw_text(ver, FRAME_WIDTH - MARGIN_X - text_w(ver), FRAME_HEIGHT - 90, C_DIM, C_BG);
 }
@@ -361,9 +533,26 @@ void ui_pump()
     else if ((b & DIRS) && now >= nextRepeat) { dirs = b & DIRS; nextRepeat = now + 110000; }
 
     int old = g_tab;
-    if (pressed & ORBIS_PAD_BUTTON_L1) g_tab = (g_tab + TAB_COUNT - 1) % TAB_COUNT;
-    if (pressed & ORBIS_PAD_BUTTON_R1) g_tab = (g_tab + 1) % TAB_COUNT;
+    if (g_mode == MODE_GRID) {
+        if (pressed & ORBIS_PAD_BUTTON_L1) g_tab = (g_tab + TAB_COUNT - 1) % TAB_COUNT;
+        if (pressed & ORBIS_PAD_BUTTON_R1) g_tab = (g_tab + 1) % TAB_COUNT;
+    }
     if (g_tab != old) g_redraw = 2;
+
+    // Опрос хода установки (раз в секунду), пока она идёт.
+    if (g_instActive && now - g_lastPoll >= 1000000) {
+        g_lastPoll = now;
+        InstallStatus st;
+        if (service_status(st)) {
+            g_inst = st;
+            if (!st.running && !st.jobs.empty()) {
+                g_instActive = false;
+                g_instFinished = true;
+                logf_("ui: установка завершена (%d файлов)", (int)st.jobs.size());
+            }
+            g_redraw = 2;
+        }
+    }
 
     static bool first = true;
     if ((g_svc == SVC_NO_LOADER || g_svc == SVC_FAIL) && (pressed & ORBIS_PAD_BUTTON_SQUARE)) {
@@ -381,11 +570,52 @@ void ui_pump()
             int dx = (dirs & ORBIS_PAD_BUTTON_RIGHT ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_LEFT ? 1 : 0);
             int dy = (dirs & ORBIS_PAD_BUTTON_DOWN ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_UP ? 1 : 0);
             if (dx || dy) cursor_move(dx, dy);
-            if ((pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
-                g_status = "Выбрано: " + g_games[(size_t)g_cursor].title + " (установка будет на следующем шаге)";
-                logf_("ui: выбрана игра %s (%s)", g_games[(size_t)g_cursor].title.c_str(), g_games[(size_t)g_cursor].path.c_str());
+            if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
+                if (g_instActive || g_instFinished) {            // уже есть установка: показываем её ход
+                    g_mode = MODE_PROGRESS;
+                } else {
+                    g_sel = g_games[(size_t)g_cursor];
+                    g_selFiles = install_files(g_sel, service_fw_major());
+                    g_selNeed = install_bytes(g_sel, service_fw_major());
+                    g_freeOk = service_free(g_freeBytes);
+                    g_confirmErr.clear();
+                    g_mode = MODE_CONFIRM;
+                    logf_("ui: окно установки: %s, нужно %llu, свободно %llu (ok=%d)", g_sel.title.c_str(),
+                          (unsigned long long)g_selNeed, (unsigned long long)g_freeBytes, g_freeOk ? 1 : 0);
+                }
                 g_redraw = 2;
             }
+        }
+    }
+
+    if (g_svc == SVC_OK && g_mode == MODE_CONFIRM) {
+        bool low = g_freeOk && g_selNeed > g_freeBytes;
+        if (pressed & ORBIS_PAD_BUTTON_CIRCLE) { g_mode = MODE_GRID; g_redraw = 2; }
+        else if ((pressed & ORBIS_PAD_BUTTON_CROSS) && !low) {
+            std::vector<std::string> paths;
+            for (size_t i = 0; i < g_selFiles.size(); i++) paths.push_back(g_selFiles[i].path);
+            std::string err;
+            std::vector<std::string> skipped;
+            if (service_install(paths, err, &skipped)) {
+                for (size_t i = 0; i < skipped.size(); i++) logf_("ui: служба пропустила: %s", skipped[i].c_str());
+                g_instTitle = g_sel.title;
+                g_instActive = true;
+                g_instFinished = false;
+                g_inst = InstallStatus();
+                g_lastPoll = 0;
+                g_mode = MODE_PROGRESS;
+                logf_("ui: установка запущена: %s (%d файлов)", g_sel.title.c_str(), (int)paths.size());
+            } else {
+                g_confirmErr = "Не удалось начать установку: " + err;
+                logf_("ui: install error: %s", err.c_str());
+            }
+            g_redraw = 2;
+        }
+    } else if (g_svc == SVC_OK && g_mode == MODE_PROGRESS) {
+        if (pressed & ORBIS_PAD_BUTTON_CIRCLE) {
+            g_mode = MODE_GRID;
+            if (g_instFinished) { g_instFinished = false; g_inst = InstallStatus(); }
+            g_redraw = 2;
         }
     }
 

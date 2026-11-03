@@ -10,7 +10,18 @@ struct Game {
     std::string title, title_id, path;
     uint64_t size = 0;
     int patches = 0, dlcs = 0, rus = 0;
+    std::vector<PkgItem> files;   // все файлы этой игры (сама игра, патчи, DLC, русификаторы)
 };
+
+// Что показывать и что отправлять на установку: если прошивка выше 9 (или неизвестна, fw_major < 0),
+// файлы Backport не нужны (служба их всё равно пропустит).
+std::vector<PkgItem> install_files(const Game& g, int fw_major);
+uint64_t install_bytes(const Game& g, int fw_major);
+
+// Порядок как у службы: игра, затем патчи (по возрастанию версии), DLC, русификаторы.
+// Нужен только для показа списка в окне; настоящий порядок решает служба.
+int file_rank(const PkgItem& it);
+std::string file_label(const PkgItem& it);   // "Игра", "Патч 01.07", "DLC: имя", "Русификатор"
 
 // Собирает плитки из списка файлов службы, по алфавиту. Файлы без самой игры (только патч)
 // плиток не дают. Копии одного файла (на диске и на флешке) учитываются один раз.

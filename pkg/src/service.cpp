@@ -5,11 +5,13 @@
 #include "net.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 
 static const int LOADER_PORT = 9090;
+static int g_fwMajor = -1;
 static const char* PAYLOAD_PATH = "/app0/assets/misc/ps4installerd.elf";
 
 // Два разных пути для одного файла автозапуска GoldHEN (так сделано и в других проектах):
@@ -38,7 +40,79 @@ bool service_query(std::string& version)
     JsonValue j;
     if (!json_parse(r.body, j) || !j["ok"].asBool()) return false;
     version = j["version"].asStr();
+    g_fwMajor = (int)atoi(j["fw"].asStr("-1").c_str());
+    if (g_fwMajor <= 0) g_fwMajor = -1;
     return !version.empty();
+}
+
+int service_fw_major() { return g_fwMajor; }
+
+static std::string json_quote(const std::string& s)
+{
+    std::string o = "\"";
+    for (size_t i = 0; i < s.size(); i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '"' || c == '\\') { o += '\\'; o += (char)c; }
+        else if (c < 0x20) { char b[8]; snprintf(b, sizeof(b), "\\u%04x", c); o += b; }
+        else o += (char)c;
+    }
+    return o + "\"";
+}
+
+bool service_free(uint64_t& bytes)
+{
+    HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, "/free", 3000);
+    if (!r.connected || r.status != 200) return false;
+    JsonValue j;
+    if (!json_parse(r.body, j) || !j["ok"].asBool()) return false;
+    bytes = (uint64_t)j["free_bytes"].asNum();
+    return true;
+}
+
+bool service_install(const std::vector<std::string>& paths, std::string& err, std::vector<std::string>* skipped)
+{
+    std::string body = "{\"paths\":[";
+    for (size_t i = 0; i < paths.size(); i++) body += (i ? "," : "") + json_quote(paths[i]);
+    body += "]}";
+    HttpResult r = http_post(SERVICE_HOST, SERVICE_PORT, "/install", body, 20000);
+    if (!r.connected) { err = "no_service"; return false; }
+    JsonValue j;
+    if (!json_parse(r.body, j)) { err = "http " + std::to_string(r.status); return false; }
+    if (!j["ok"].asBool()) {
+        err = j["error"].asStr("error");
+        std::string d = j["detail"].asStr();
+        if (!d.empty()) err += ": " + d;
+        return false;
+    }
+    if (skipped) {
+        const JsonValue& sk = j["skipped"];
+        for (size_t i = 0; i < sk.arr.size(); i++)
+            skipped->push_back(sk.arr[i]["path"].asStr() + " - " + sk.arr[i]["reason"].asStr());
+    }
+    return true;
+}
+
+bool service_status(InstallStatus& out)
+{
+    out = InstallStatus();
+    HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, "/status", 2500);
+    if (!r.connected || r.status != 200) return false;
+    JsonValue j;
+    if (!json_parse(r.body, j)) return false;
+    out.running = j["state"].asStr() == "running";
+    const JsonValue& jobs = j["jobs"];
+    for (size_t i = 0; i < jobs.arr.size(); i++) {
+        InstallJob jb;
+        jb.path = jobs.arr[i]["path"].asStr();
+        jb.kind = jobs.arr[i]["kind"].asStr();
+        jb.status = jobs.arr[i]["status"].asStr();
+        jb.message = jobs.arr[i]["message"].asStr();
+        jb.size = (uint64_t)jobs.arr[i]["size"].asNum();
+        jb.length = (uint64_t)jobs.arr[i]["length"].asNum();
+        jb.transferred = (uint64_t)jobs.arr[i]["transferred"].asNum();
+        out.jobs.push_back(jb);
+    }
+    return true;
 }
 
 bool service_send_payload(std::string& err, bool* connectFailed)

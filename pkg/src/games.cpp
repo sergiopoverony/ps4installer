@@ -26,6 +26,7 @@ void build_games(const std::vector<PkgItem>& items, std::vector<Game>& out)
         bool extra = it.kind != "game" || it.patch;
         Game& g = by[it.title_id];
         if (g.title_id.empty()) g.title_id = it.title_id;
+        g.files.push_back(it);
         if (extra) {
             if (it.rus) g.rus++;
             else if (it.kind == "dlc" || it.kind == "dlc_nodata" || it.dlc_name) g.dlcs++;
@@ -94,3 +95,45 @@ std::string fmt_size(uint64_t b)
     return buf;
 }
 
+
+int file_rank(const PkgItem& it)
+{
+    bool extra = it.kind != "game" || it.patch;
+    if (it.rus && extra) return 3;
+    if (it.kind == "dlc" || it.kind == "dlc_nodata" || it.dlc_name) return 2;
+    if (extra) return 1;
+    return 0;
+}
+
+std::string file_label(const PkgItem& it)
+{
+    switch (file_rank(it)) {
+        case 0: return "Игра";
+        case 1: return it.ver.empty() ? "Патч" : "Патч " + it.ver;
+        case 2: return it.title.empty() ? "DLC" : "DLC: " + it.title;
+        default: return "Русификатор";
+    }
+}
+
+std::vector<PkgItem> install_files(const Game& g, int fw_major)
+{
+    std::vector<PkgItem> out;
+    for (size_t i = 0; i < g.files.size(); i++) {
+        if (g.files[i].backport && (fw_major < 0 || fw_major > 9)) continue;
+        out.push_back(g.files[i]);
+    }
+    std::stable_sort(out.begin(), out.end(), [](const PkgItem& a, const PkgItem& b) {
+        int ra = file_rank(a), rb = file_rank(b);
+        if (ra != rb) return ra < rb;
+        return a.size > b.size;
+    });
+    return out;
+}
+
+uint64_t install_bytes(const Game& g, int fw_major)
+{
+    uint64_t n = 0;
+    std::vector<PkgItem> f = install_files(g, fw_major);
+    for (size_t i = 0; i < f.size(); i++) n += f[i].size;
+    return n;
+}

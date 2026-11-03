@@ -29,3 +29,24 @@ bool service_send_payload(std::string& err, bool* connectFailed = nullptr);
 // /data/GoldHEN/payloads.ini (секция [AutoRun], путь с /user): тогда GoldHEN сам запускает
 // службу после включения консоли. Если строка уже есть (включена или выключена пользователем), файл не трогаем.
 bool service_install_autorun(std::string& err);
+
+// Версия прошивки (основная часть, 13 для 13.02) из /health, -1 если не удалось.
+int service_fw_major();
+
+// Свободное место на диске консоли (GET /free).
+bool service_free(uint64_t& bytes);
+
+// POST /install. true, если служба приняла очередь. При отказе в err текст причины (detail службы).
+// skipped: что служба решила не ставить (backport, старые патчи) и почему.
+bool service_install(const std::vector<std::string>& paths, std::string& err, std::vector<std::string>* skipped = nullptr);
+
+// Ход установки (GET /status).
+struct InstallJob {
+    std::string path, kind, status, message;
+    uint64_t size = 0, length = 0, transferred = 0;
+};
+struct InstallStatus {
+    bool running = false;
+    std::vector<InstallJob> jobs;
+};
+bool service_status(InstallStatus& out);
