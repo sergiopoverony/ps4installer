@@ -205,6 +205,15 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(code, 200, j)
         self.assertEqual(j["order"], [other, game, patch])
 
+    def test_busy_register_is_retried(self):
+        a = make_pkg(DATA_PKG / "busy.pkg", "UP0001-CUSA00031_00-BUSYBUSYBUSYBUSY", 0x3000)
+        self.srv = Server()
+        code, j = self.srv.post("/install", {"paths": [a]})
+        self.assertEqual(code, 200, j)
+        st = self.srv.wait_idle()
+        self.assertEqual([x["status"] for x in st["jobs"]], ["done"])
+        self.assertEqual(self.log_text().count("система занята"), 2)
+
     def test_bad_requests(self):
         ok = make_pkg(DATA_PKG / "ok.pkg", "UP0001-CUSA00021_00-OKOKOKOKOKOKOKOK", 0x2000)
         (DATA_PKG / "garbage.pkg").write_bytes(b"x" * 5000)

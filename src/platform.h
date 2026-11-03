@@ -29,5 +29,8 @@ struct Progress {
 bool bgft_progress(int task_id, Progress* p, uint32_t* err);
 
 constexpr uint32_t BGFT_ERR_ALREADY_INSTALLED = 0x80990088;
+// Система ещё занята прежней задачей с тем же content id (бывает сразу после предыдущей установки;
+// причина предположительная, на консоли не подтверждена): регистрацию стоит повторить позже.
+constexpr uint32_t BGFT_ERR_BUSY = 0x80990015;
 
 }  // namespace platform

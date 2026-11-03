@@ -24,12 +24,14 @@ namespace platform {
 // Заглушки для проверок на ПК. Поведение управляется содержимым content id:
 //   "...-FAIL..."   регистрация возвращает ошибку 0x80990001
 //   повторная установка того же content id -> "уже установлено"
+//   "...-BUSY..."   первые две регистрации возвращают 0x80990015 (занято), потом успех
 //   "...-STALL..."  прогресс никогда не растёт (проверка таймаута)
 
 static std::mutex g_fake_mu;
 static std::map<int, std::pair<std::string, uint64_t>> g_fake_tasks;  // task -> (content id, polls)
 static std::map<std::string, bool> g_fake_installed;
 static int g_fake_next_task = 100;
+static std::map<std::string, int> g_fake_busy;
 
 void notify(const std::string& msg) { log_printf("NOTIFY: %s", msg.c_str()); }
 void power_tick() {}
@@ -59,6 +61,10 @@ bool bgft_register_local(const std::string& path, const std::string& content_id,
     log_printf("fake register %s (%s)", path.c_str(), content_id.c_str());
     if (content_id.find("FAIL") != std::string::npos) {
         *err = 0x80990001;
+        return false;
+    }
+    if (content_id.find("BUSY") != std::string::npos && g_fake_busy[content_id]++ < 2) {
+        *err = BGFT_ERR_BUSY;
         return false;
     }
     if (g_fake_installed[content_id]) {

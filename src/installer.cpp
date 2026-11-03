@@ -78,7 +78,19 @@ void run_job(int idx) {
 
     int task = -1;
     uint32_t err = 0;
-    if (!platform::bgft_register_local(bgft_path(pkg.path), pkg.content_id, &task, &err)) {
+    bool registered = platform::bgft_register_local(bgft_path(pkg.path), pkg.content_id, &task, &err);
+    // 0x80990015 ("занято"): повторяем с паузой до ~90 секунд (в тестах паузы короче).
+    for (int attempt = 1; !registered && err == platform::BGFT_ERR_BUSY && attempt <= 30; attempt++) {
+        log_printf("install: система занята (0x80990015), повтор %d через паузу: %s", attempt, pkg.content_id.c_str());
+        {
+            std::unique_lock<std::mutex> lk(g_mu);
+            if (g_cv.wait_for(lk, std::chrono::milliseconds(g_poll_ms * 3), [] { return g_stop; })) {
+                return;
+            }
+        }
+        registered = platform::bgft_register_local(bgft_path(pkg.path), pkg.content_id, &task, &err);
+    }
+    if (!registered) {
         if (err == platform::BGFT_ERR_ALREADY_INSTALLED) {
             set_status(idx, "already_installed", "уже установлено");
             log_printf("install skip (already installed): %s", pkg.content_id.c_str());
