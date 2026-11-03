@@ -337,7 +337,8 @@ class NoticeTest(unittest.TestCase):
     def test_classify(self):
         import online_report as orp
         self.assertEqual(orp.classify("Online play required | Online players 2-100"), "online_only")
-        self.assertEqual(orp.classify("Online play required | 1 players"), "has_offline")
+        self.assertEqual(orp.classify("Online play required | 1 players"), "online_only")
+        self.assertEqual(orp.classify("Online play optional | 1 players"), "has_offline")
         self.assertEqual(orp.classify(""), "unknown")
 
 if __name__ == "__main__":

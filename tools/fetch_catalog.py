@@ -619,9 +619,17 @@ def process_game(g, cache_dir, opts):
 
 # --------------------------------------------------------------------------- упаковка
 
-def pack(games, cache_dir, out_dir, log=print):
-    """Собирает catalog.pak + catalog.json из кэша. Возвращает (кол-во игр, размер pak)."""
+def needs_online(notice):
+    """Магазин пишет 'Online play required' - без интернета игра не запустится или бесполезна.
+    ('Online play optional' - это нормально: игра работает и без сети.)"""
+    return "online play required" in (notice or "").lower()
+
+
+def pack(games, cache_dir, out_dir, log=print, keep_online=False):
+    """Собирает catalog.pak + catalog.json из кэша. Возвращает (кол-во игр, размер pak).
+    Игры, которым нужен интернет, не включаются (keep_online=True оставляет их)."""
     out_dir.mkdir(parents=True, exist_ok=True)
+    removed = []
     pak_tmp = out_dir / "catalog.pak.tmp"
     index = []
     skipped = 0
@@ -646,6 +654,9 @@ def pack(games, cache_dir, out_dir, log=print):
             if meta.get("status") not in ("ok", "partial"):
                 skipped += 1
                 continue
+            if not keep_online and needs_online(meta.get("notice")):
+                removed.append("%s  %s" % (g["id"], g["name"]))
+                continue
             entry = {"id": g["id"], "cid": g["cid"], "n": g["name"]}
             if meta.get("name_ru"):
                 entry["r"] = meta["name_ru"]
@@ -666,7 +677,9 @@ def pack(games, cache_dir, out_dir, log=print):
     pak_tmp.replace(out_dir / "catalog.pak")
     doc = {"version": PAK_VERSION, "count": len(index), "games": index}
     (out_dir / "catalog.json").write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-    log("Упаковано игр: %d, пропущено (нет данных): %d" % (len(index), skipped))
+    log("Упаковано игр: %d, пропущено (нет данных): %d, убрано (нужен интернет): %d" % (
+        len(index), skipped, len(removed)))
+    (out_dir / "removed_online.txt").write_text("\n".join(removed) + "\n", encoding="utf-8")
     log("catalog.pak: %.1f МБ, catalog.json: %.1f КБ" % (pos / 1048576.0, (out_dir / "catalog.json").stat().st_size / 1024.0))
     if pos > LIMIT_BYTES:
         log("ВНИМАНИЕ: pak больше 4 ГБ, PKG не поместится в лимит. Уменьшите число игр или размеры картинок.")
@@ -697,6 +710,8 @@ def main(argv=None):
     ap.add_argument("--retry-partial", action="store_true", help="повторить игры с неполными данными")
     ap.add_argument("--force", action="store_true", help="перекачать всё выбранное заново")
     ap.add_argument("--pack-only", action="store_true", help="не качать, только собрать pak из кэша")
+    ap.add_argument("--keep-online", action="store_true",
+                    help="не убирать игры с 'Online play required' (по умолч. убираются)")
     ap.add_argument("--no-pack", action="store_true", help="только скачать, pak не собирать")
     ap.add_argument("--debug", action="store_true", help="подробный вывод и сохранение страниц в data/debug/")
     opts = ap.parse_args(argv)
@@ -798,7 +813,7 @@ def main(argv=None):
             "nopage = страницы нет, neterr = сеть (повторится при следующем запуске), skip = уже было")
 
     if not opts.no_pack:
-        pack(games, cache_dir, out_dir, log)
+        pack(games, cache_dir, out_dir, log, keep_online=opts.keep_online)
         log("Готово. Файлы: %s и %s" % (out_dir / "catalog.pak", out_dir / "catalog.json"))
     return 0
 

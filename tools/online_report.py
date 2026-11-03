@@ -7,27 +7,27 @@ online_report.py - отчёт по режимам игр (только сете�
 
   python3 tools/online_report.py              # сводка и кандидаты на удаление
   python3 tools/online_report.py --all        # весь список кандидатов
-Правило "только сетевая" (черновое, проверяется глазами по списку):
-  в строке есть "online play required" (или "online only") И нет пункта "N players" (одиночный/локальный режим).
+Правило: у игры в строке есть "Online play required" - без интернета она не работает, её убираем.
+"Online play optional" и "N network players" само по себе - не причина (игра идёт и без сети).
+При упаковке такие игры не попадают в каталог (список - data/removed_online.txt).
 """
 import argparse
 import collections
 import json
 import re
+import sys
 from pathlib import Path
+
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 def classify(notice):
     """Возвращает 'online_only' | 'has_offline' | 'unknown'."""
     if not notice:
         return "unknown"
-    low = notice.lower()
-    parts = [p.strip() for p in low.split("|")]
-    has_players = any(re.fullmatch(r"\d+(\s*-\s*\d+)?\s+players?", p) for p in parts)
-    needs_online = "online play required" in low or "online only" in low
-    if needs_online and not has_players:
-        return "online_only"
-    return "has_offline"
+    from fetch_catalog import needs_online
+    return "online_only" if needs_online(notice) else "has_offline"
 
 
 def main():
