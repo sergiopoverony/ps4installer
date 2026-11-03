@@ -140,6 +140,13 @@ clean:
 full:
 	$(MAKE) -C ..
 	$(MAKE) clean
-	$(MAKE) all
+	$(MAKE) all NOCATALOG=$(NOCATALOG)
+
+# То же, но каталог в PKG не кладётся (для проверок: каталог лежит на консоли в /data/ps4installer_app/catalog/).
+.PHONY: full-nocatalog
+full-nocatalog:
+	$(MAKE) -C ..
+	$(MAKE) clean
+	$(MAKE) all NOCATALOG=1
 
 .PHONY: all clean
