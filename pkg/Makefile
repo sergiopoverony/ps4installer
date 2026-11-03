@@ -29,7 +29,8 @@ ifneq ($(wildcard ../data/catalog.pak),)
 ASSETS      += assets/misc/catalog.json assets/misc/catalog.pak
 endif
 endif
-ASSETS      += assets/misc/ps4installerd.elf assets/misc/catalog.json assets/misc/catalog.pak
+ASSETS      += assets/misc/ps4installerd.elf
+$(info Каталог игр в PKG: $(if $(filter assets/misc/catalog.pak,$(ASSETS)),ВШИТ,НЕ вшит))
 
 # Системные модули для приложения (без libc.prx приложение сразу вылетает). Берутся из набора OpenOrbis.
 LIBMODULES  := sce_module/libc.prx sce_module/libSceFios2.prx
