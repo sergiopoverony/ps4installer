@@ -86,6 +86,15 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(r["shots"], ["https://x/s1.png", "https://x/s2.png"])
         self.assertEqual(r["desc"], "Первый абзац.\n\nВторой абзац & всё.")
 
+    def test_real_page_structure(self):
+        """Фикстура собрана из настоящей страницы PS Store (блок media-carousel + абзац overview)."""
+        html = (Path(__file__).resolve().parent / "fixtures" / "ps_store_cusa15080.html").read_text(encoding="utf-8")
+        r = fc.parse_page(html, "UP0006-CUSA15080_00-STARWARSQUADRONS")
+        self.assertEqual(r["name"], "STAR WARS™: Squadrons")
+        self.assertEqual(len(r["shots"]), 7)
+        self.assertTrue(all(u.startswith("https://image.api.playstation.com/") for u in r["shots"]))
+        self.assertEqual(r["desc"], "Synthetic test description for a game.\n\nSecond paragraph & more text.\n\nThird paragraph.")
+
     def test_parse_refs(self):
         state = {
             "Media:1": {"role": "SCREENSHOT", "type": "IMAGE", "url": "https://x/a.png"},
@@ -175,7 +184,7 @@ class PipelineTests(unittest.TestCase):
 
     def run_main(self, *extra):
         return fc.main(["--out", str(self.root / "data"), "--catalog", str(self.catalog),
-                        "--workers", "2", "--delay", "0"] + list(extra))
+                        "--workers", "2", "--delay", "0", "--locales", "ru-ru,ru-ua,en-us"] + list(extra))
 
     def test_full_run_and_pak_format(self):
         self.assertEqual(self.run_main(), 0)

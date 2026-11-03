@@ -176,7 +176,8 @@ def pick_sample(games, limit):
 
 # --------------------------------------------------------------------------- разбор страницы PS Store
 
-_NEXT_RE = re.compile(r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S)
+_JSON_SCRIPT_RE = re.compile(r'<script[^>]*(?:type="application/json"|id="__NEXT_DATA__")[^>]*>(.*?)</script>', re.S)
+_OVERVIEW_RE = re.compile(r'data-qa="mfe-game-overview#description"[^>]*>(.*?)</p>', re.S)
 _META_RE = r'<meta[^>]+(?:property|name)="%s"[^>]+content="([^"]*)"'
 
 
@@ -266,48 +267,61 @@ def _desc_from_product(p, state):
 def parse_page(page_html, product_id=None):
     """Возвращает {'name','desc','shots','diag'}. diag - список строк для --debug."""
     res = {"name": "", "desc": "", "shots": [], "diag": []}
-    m = _NEXT_RE.search(page_html)
-    if m:
+    # На странице десятки блоков <script type="application/json"> (__NEXT_DATA__ и env:...).
+    # Скриншоты лежат в блоке media-carousel как Product.media, описание - в HTML блока overview.
+    docs = []
+    for m in _JSON_SCRIPT_RE.finditer(page_html):
         try:
-            data = json.loads(m.group(1))
+            docs.append(json.loads(m.group(1)))
         except ValueError:
-            data = None
-            res["diag"].append("__NEXT_DATA__ найден, но это не JSON")
-    else:
-        data = None
-        res["diag"].append("__NEXT_DATA__ не найден")
-
-    if data is not None:
-        state = None
-        for d in _walk(data):
-            if "apolloState" in d and isinstance(d["apolloState"], dict):
+            pass
+    res["diag"].append("JSON-блоков на странице: %d" % len(docs))
+    state = None
+    for doc in docs:
+        for d in _walk(doc):
+            if isinstance(d.get("apolloState"), dict):
                 state = d["apolloState"]
                 break
-        roots = [data] + ([state] if state else [])
-        cands = []
-        for root in roots:
-            for d in _walk(root):
-                if isinstance(d.get("name"), str) and isinstance(d.get("media"), list):
-                    cands.append(d)
-        res["diag"].append("кандидатов-продуктов: %d" % len(cands))
-        chosen = None
-        if product_id:
-            for d in cands:
-                if product_id in str(d.get("id", "")):
-                    chosen = d
-                    break
-        if chosen is None:
-            for d in cands:
-                if _shots_from_media(d["media"], state):
-                    chosen = d
-                    break
-        if chosen is None and cands:
-            chosen = cands[0]
+        if state:
+            break
+    cands = []
+    for root in docs + ([state] if state else []):
+        for d in _walk(root):
+            if isinstance(d.get("name"), str) and isinstance(d.get("media"), list):
+                cands.append(d)
+    res["diag"].append("кандидатов-продуктов: %d" % len(cands))
+    # сначала продукт с нужным id (лучше тот, где есть скриншоты), потом любой со скриншотами
+    mine = [d for d in cands if product_id and product_id in str(d.get("id", ""))]
+    chosen = None
+    for group in (mine, cands):
+        for d in group:
+            if _shots_from_media(d["media"], state):
+                chosen = d
+                break
+        if chosen is None and group is mine and mine:
+            chosen = mine[0]
         if chosen is not None:
-            res["name"] = chosen["name"].strip()
-            res["shots"] = _shots_from_media(chosen["media"], state)
-            res["desc"] = _desc_from_product(chosen, state)
-            res["diag"].append("продукт: id=%s" % chosen.get("id"))
+            break
+    if chosen is None and cands:
+        chosen = cands[0]
+    if chosen is not None:
+        res["name"] = chosen["name"].strip()
+        res["shots"] = _shots_from_media(chosen["media"], state)
+        res["desc"] = _desc_from_product(chosen, state)
+        res["diag"].append("продукт: id=%s" % chosen.get("id"))
+
+    # основное описание игры - абзац в блоке overview
+    mo = _OVERVIEW_RE.search(page_html)
+    if mo:
+        txt = html_to_text(mo.group(1))
+        if txt:
+            res["desc"] = txt
+            res["diag"].append("описание взято из блока overview")
+    if not res["name"]:
+        mt = re.search(r"<title>(.*?)</title>", page_html, re.S | re.I)
+        if mt and mt.group(1).strip():
+            res["name"] = htmllib.unescape(mt.group(1)).strip()
+            res["diag"].append("название взято из <title>")
 
     # запасной вариант - мета-теги (описание и название, скриншотов тут нет)
     if not res["desc"]:
@@ -571,8 +585,8 @@ def main(argv=None):
     ap.add_argument("--ids", help="только эти Title ID через запятую, например CUSA00419,CUSA01234")
     ap.add_argument("--workers", type=int, default=6, help="параллельных загрузок (по умолч. 6)")
     ap.add_argument("--delay", type=float, default=0.15, help="пауза перед запросом, сек (по умолч. 0.15)")
-    ap.add_argument("--locales", default="ru-ru,ru-ua,en-us",
-                    help="какие версии страницы пробовать по порядку (по умолч. ru-ru,ru-ua,en-us)")
+    ap.add_argument("--locales", default="en-us",
+                    help="какие версии страницы пробовать по порядку (по умолч. en-us)")
     ap.add_argument("--retry-partial", action="store_true", help="повторить игры с неполными данными")
     ap.add_argument("--force", action="store_true", help="перекачать всё выбранное заново")
     ap.add_argument("--pack-only", action="store_true", help="не качать, только собрать pak из кэша")
