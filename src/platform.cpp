@@ -312,15 +312,13 @@ bool bgft_load(std::string* err) {
         *err = g_load_err;
         return false;
     }
+    // Память под BGFT берём не из кучи (она может быть исчерпана после многих замен службы), а из
+    // заранее выделенного статического буфера: он есть с момента загрузки программы.
     static BgftInitParams params;
+    alignas(4096) static uint8_t bgft_heap[1 * 1024 * 1024];
     memset(&params, 0, sizeof(params));
-    params.heapSize = 1 * 1024 * 1024;
-    params.heap = calloc(1, params.heapSize);
-    if (!params.heap) {
-        g_load_err = "нет памяти для кучи BGFT";
-        *err = g_load_err;
-        return false;
-    }
+    params.heap = bgft_heap;
+    params.heapSize = sizeof(bgft_heap);
     int ret = init(&params);
     log_printf("bgft init -> 0x%08X", (unsigned)ret);
     // 0x80990001 после замены службы на новую версию: старая копия уже инициализировала BGFT
