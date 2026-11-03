@@ -247,7 +247,7 @@ static void draw_tile(int x, int y, const Game& g, bool selected)
     }
 
     if (g.incomplete && !g.installed) {
-        std::string m = "НЕ ДОКАЧАНА";
+        std::string m = "НЕ ДОКАЧАНО";
         int w = text_w(m) + 16;
         int mx = x + (TILE_W - w) / 2, my = y + IMG_H / 2 - (FONT_PX + 16) / 2;
         fill(mx, my, w, FONT_PX + 16, C_RED_BG);
@@ -640,7 +640,7 @@ static unsigned pad_read()
 
 bool ui_init()
 {
-    catalog_load("/app0/assets/data");
+    catalog_load("/app0/assets/misc");
     g_scene = new Scene2D(FRAME_WIDTH, FRAME_HEIGHT, FRAME_DEPTH);
     if (!g_scene->Init(0xC000000, 2)) { logf_("ui: scene init FAILED"); return false; }
     if (!g_scene->InitFont(&g_font, "/app0/assets/fonts/DejaVuSansMono.ttf", FONT_PX)) { logf_("ui: font init FAILED"); return false; }

@@ -19,13 +19,14 @@ EXTRAFLAGS  := -O2
 # Версия приложения = версия службы (из ../src/version.h).
 APPVER      := $(shell sed -n 's/.*APP_VERSION "\(.*\)".*/\1/p' ../src/version.h)
 
-# Порядок важен: create-gp4 собирает папки по списку файлов, и список должен идти по алфавиту папок
-# (data, fonts, misc). Каталог игр (data/catalog.pak + data/catalog.json, делает tools/fetch_catalog.py);
-# если его нет, в PKG он не кладётся: приложение работает, но без обложек и описаний.
+# Каталог игр (data/catalog.pak + data/catalog.json, делает tools/fetch_catalog.py) лежит в assets/misc:
+# create-gp4 знает только папки assets/audio, fonts, images, misc, videos (своя папка data ломает сборку).
+# Если каталога нет, в PKG он не кладётся: приложение работает, но без обложек и описаний.
+ASSETS      := assets/fonts/DejaVuSansMono.ttf assets/fonts/LICENSE-DejaVu.txt
 ifneq ($(wildcard ../data/catalog.pak),)
-ASSETS      := assets/data/catalog.json assets/data/catalog.pak
+ASSETS      += assets/misc/catalog.json assets/misc/catalog.pak
 endif
-ASSETS      += assets/fonts/DejaVuSansMono.ttf assets/fonts/LICENSE-DejaVu.txt assets/misc/ps4installerd.elf
+ASSETS      += assets/misc/ps4installerd.elf
 
 # Системные модули для приложения (без libc.prx приложение сразу вылетает). Берутся из набора OpenOrbis.
 LIBMODULES  := sce_module/libc.prx sce_module/libSceFios2.prx
@@ -42,7 +43,7 @@ CFLAGS      := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c $(EXTRA
 CXXFLAGS    := $(CFLAGS) -isystem $(TOOLCHAIN)/include/c++/v1
 LDFLAGS     := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crt1.o
 
-_unused     := $(shell mkdir -p $(INTDIR) sce_sys/about sce_module assets/misc assets/data)
+_unused     := $(shell mkdir -p $(INTDIR) sce_sys/about sce_module assets/misc)
 
 UNAME_S     := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
@@ -89,10 +90,10 @@ send:
 assets/misc/ps4installerd.elf: ../build/ps4installerd.elf
 	cp $< $@
 
-assets/data/catalog.pak: ../data/catalog.pak
+assets/misc/catalog.pak: ../data/catalog.pak
 	cp $< $@
 
-assets/data/catalog.json: ../data/catalog.json
+assets/misc/catalog.json: ../data/catalog.json
 	cp $< $@
 
 sce_sys/icon0.png: gfx/icon0.png
