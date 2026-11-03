@@ -242,9 +242,24 @@ static bool tile_images_step()
 {
     int n = (int)g_games.size();
     if ((int)g_tileImg.size() != n) { g_tileImg.assign((size_t)n, CatImage()); g_tileTried.assign((size_t)n, 0); }
-    int first = (g_topRow - 1) * COLS, last = (g_topRow + ROWS_VIS + 1) * COLS;   // видимые и соседние ряды
-    for (int i = 0; i < n; i++)
-        if ((i < first || i >= last) && g_tileTried[(size_t)i]) { g_tileImg[(size_t)i] = CatImage(); g_tileTried[(size_t)i] = 0; }
+    // Загруженные картинки хранятся до закрытия программы (прокрутка вверх-вниз не грузит их заново).
+    // Чтобы не съесть память (одна плитка ~450 КБ), держим не больше MAX_TILE_IMAGES: лишние, самые далёкие
+    // от текущего ряда, выбрасываем.
+    const int MAX_TILE_IMAGES = 48;
+    int loaded = 0;
+    for (int i = 0; i < n; i++) if (g_tileImg[(size_t)i].ok()) loaded++;
+    while (loaded > MAX_TILE_IMAGES) {
+        int far = -1, farDist = -1, center = (g_topRow + 1) * COLS;
+        for (int i = 0; i < n; i++) {
+            if (!g_tileImg[(size_t)i].ok()) continue;
+            int d = i > center ? i - center : center - i;
+            if (d > farDist) { farDist = d; far = i; }
+        }
+        if (far < 0) break;
+        g_tileImg[(size_t)far] = CatImage();
+        g_tileTried[(size_t)far] = 0;
+        loaded--;
+    }
     int vFirst = g_topRow * COLS, vLast = (g_topRow + ROWS_VIS) * COLS;
     for (int i = vFirst; i < vLast && i < n; i++) {
         if (g_tileTried[(size_t)i]) continue;
@@ -482,35 +497,25 @@ static void draw_info_top(const Game& g, int x, int y, int W)
 
 static void draw_confirm()
 {
-    const int W = 1700, H = 900;
-    int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + 20;
+    const int W = 1700, H = 640;
+    int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + 40;
     draw_panel(x, y, W, H);
     draw_info_top(g_sel, x, y, W);
     int tx = x + 40, ty = y + 30 + COVER_H + 50;
     int maxc = (W - 80) / g_cellW;
 
-    draw_text("Будет установлено:", tx, ty, C_DIM, C_PANEL);
-    ty += FONT_PX + 12;
-    int maxRows = 5;
-    for (size_t i = 0; i < g_selFiles.size() && (int)i < maxRows; i++) {
-        std::string lab = fit_chars(file_label(g_selFiles[i]), maxc - 14);
-        std::string sz = fmt_size(g_selFiles[i].size);
-        draw_text(lab, tx + 20, ty, C_TEXT, C_PANEL);
-        draw_text(sz, x + W - 40 - text_w(sz), ty, C_DIM, C_PANEL);
-        ty += FONT_PX + 8;
+    // Только главное: сколько нужно и сколько свободно.
+    draw_text("Нужно места: " + fmt_size(g_selNeed), tx, ty, C_TEXT, C_PANEL);
+    if (g_freeOk) {
+        std::string fr = "Свободно: " + fmt_size(g_freeBytes);
+        draw_text(fr, x + W - 40 - text_w(fr), ty, C_TEXT, C_PANEL);
+    } else {
+        std::string fr = "Свободное место узнать не удалось";
+        draw_text(fr, x + W - 40 - text_w(fr), ty, C_WARN, C_PANEL);
     }
-    if ((int)g_selFiles.size() > maxRows) {
-        draw_text("... и ещё " + std::to_string(g_selFiles.size() - maxRows), tx + 20, ty, C_DIM, C_PANEL);
-        ty += FONT_PX + 8;
-    }
-    ty += 14;
-    draw_text("Всего нужно: " + fmt_size(g_selNeed), tx, ty, C_TEXT, C_PANEL);
-    ty += FONT_PX + 10;
-    if (g_freeOk) draw_text("Свободно на консоли: " + fmt_size(g_freeBytes), tx, ty, C_TEXT, C_PANEL);
-    else draw_text("Свободное место узнать не удалось (нет связи со службой)", tx, ty, C_WARN, C_PANEL);
 
     bool low = g_cardReason == CARD_OK && g_freeOk && g_selNeed > g_freeBytes;
-    int by = y + H - 110;
+    int by = y + H - 130;
     if (g_cardReason != CARD_OK) {
         const char* msg = g_cardReason == CARD_INSTALLED ? "УЖЕ УСТАНОВЛЕНО" :
                           g_cardReason == CARD_INCOMPLETE ? "НЕ ДОКАЧАНО - ДОЖДИТЕСЬ ЗАГРУЗКИ ФАЙЛОВ" : "УЖЕ В ОЧЕРЕДИ НА УСТАНОВКУ";
