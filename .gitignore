@@ -4,3 +4,12 @@ __pycache__/
 build/
 *.pkg
 release/*.elf
+
+# PKG-приложение: собранные файлы
+pkg/build/
+pkg/sce_sys/
+pkg/sce_module/
+pkg/eboot.bin
+pkg/pkg.gp4
+pkg/*.pkg
+pkg/assets/misc/*.elf
