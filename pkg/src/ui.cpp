@@ -106,6 +106,12 @@ static void fill(int x, int y, int w, int h, Color c) { g_scene->FillRect(x, y, 
 
 // ---------------------------------------------------------------- игры
 
+// Запуск службы: проверить, при необходимости отправить ELF из PKG в BinLoader GoldHEN и дождаться ответа.
+enum SvcState { SVC_CHECK = 0, SVC_STARTING, SVC_OK, SVC_NO_LOADER, SVC_FAIL };
+static SvcState g_svc = SVC_CHECK;
+static bool g_svcDrawn = false;   // сообщение «Проверка/Запуск» уже показано на экране
+static bool g_autorunTried = false;
+
 enum LoadState { LS_NONE = 0, LS_LOADING, LS_OK, LS_ERROR };
 static LoadState g_load = LS_NONE;
 static std::string g_loadErr;
@@ -176,6 +182,24 @@ static void draw_tile(int x, int y, const Game& g, bool selected)
         draw_text(lines[i], x + 8, y + IMG_H + 30 + (int)i * (FONT_PX + 4), C_TEXT, bg);
 }
 
+static void draw_service_message()
+{
+    int y = GRID_TOP + 60;
+    if (g_svc == SVC_CHECK) {
+        draw_text("Проверка службы установки...", MARGIN_X, y, C_TEXT, C_BG);
+    } else if (g_svc == SVC_STARTING) {
+        draw_text("Запуск службы установки...", MARGIN_X, y, C_TEXT, C_BG);
+        draw_text("Это занимает несколько секунд.", MARGIN_X, y + 50, C_DIM, C_BG);
+    } else if (g_svc == SVC_NO_LOADER) {
+        draw_text("Не удалось запустить службу: загрузчик payload'ов выключен.", MARGIN_X, y, C_WARN, C_BG);
+        draw_text("Включите в GoldHEN: Servers settings - Enable Payloader Server.", MARGIN_X, y + 50, C_TEXT, C_BG);
+        draw_text("Затем нажмите Квадрат.", MARGIN_X, y + 100, C_DIM, C_BG);
+    } else {
+        draw_text("Служба установки не запустилась.", MARGIN_X, y, C_WARN, C_BG);
+        draw_text("Подождите немного и нажмите Квадрат. Если не помогает, перезапустите GoldHEN.", MARGIN_X, y + 50, C_DIM, C_BG);
+    }
+}
+
 static void draw_available()
 {
     if (g_load == LS_LOADING || g_load == LS_NONE) {
@@ -233,7 +257,9 @@ static void draw_all()
     x += 8;
     draw_text("R1", x, HEAD_H / 2 + FONT_PX / 3, C_DIM, C_HEAD);
 
-    if (g_tab == TAB_AVAILABLE) {
+    if (g_svc != SVC_OK) {
+        draw_service_message();
+    } else if (g_tab == TAB_AVAILABLE) {
         draw_available();
     } else {
         std::string body = std::string("Здесь будет вкладка «") + TAB_NAMES[g_tab] + "»";
@@ -340,7 +366,12 @@ void ui_pump()
     if (g_tab != old) g_redraw = 2;
 
     static bool first = true;
-    if (g_tab == TAB_AVAILABLE) {
+    if ((g_svc == SVC_NO_LOADER || g_svc == SVC_FAIL) && (pressed & ORBIS_PAD_BUTTON_SQUARE)) {
+        g_svc = SVC_CHECK;
+        g_svcDrawn = false;
+        g_redraw = 2;
+    }
+    if (g_svc == SVC_OK && g_tab == TAB_AVAILABLE) {
         if ((first || (pressed & ORBIS_PAD_BUTTON_SQUARE)) && g_load != LS_LOADING) {
             first = false;
             g_load = LS_LOADING;
@@ -369,6 +400,45 @@ void ui_pump()
         drew = true;
         static bool hidden = false;
         if (!hidden) { hidden = true; int r = sceSystemServiceHideSplashScreen(); logf_("ui: HideSplashScreen = 0x%08X", (unsigned)r); }
+    }
+
+    // Запуск службы: сообщение показываем до блокирующих действий.
+    if (g_svc == SVC_CHECK || g_svc == SVC_STARTING) {
+        if (drew) g_svcDrawn = true;
+        if (g_svcDrawn) {
+            if (g_svc == SVC_CHECK) {
+                std::string ver;
+                if (service_query(ver) && ver == APP_VERSION) {
+                    logf_("service: уже запущена, версия %s", ver.c_str());
+                    g_svc = SVC_OK;
+                } else {
+                    logf_("service: нужна (повторная) отправка, ответ=%s ожидали=%s", ver.empty() ? "нет" : ver.c_str(), APP_VERSION);
+                    g_svc = SVC_STARTING;
+                    g_svcDrawn = false;
+                }
+                g_redraw = 2;
+            } else {
+                std::string err;
+                bool noLoader = false;
+                if (!service_send_payload(err, &noLoader)) {
+                    g_svc = noLoader ? SVC_NO_LOADER : SVC_FAIL;
+                } else {
+                    g_svc = SVC_FAIL;
+                    for (int i = 0; i < 30; i++) {   // ждём ответа до ~15 секунд
+                        sceKernelUsleep(500000);
+                        std::string ver;
+                        if (service_query(ver) && ver == APP_VERSION) { g_svc = SVC_OK; break; }
+                    }
+                }
+                if (g_svc == SVC_OK && !g_autorunTried) {   // один раз за запуск приложения: автозапуск службы
+                    g_autorunTried = true;
+                    std::string aerr;
+                    service_install_autorun(aerr);
+                }
+                logf_("service: итог запуска = %d", (int)g_svc);
+                g_redraw = 2;
+            }
+        }
     }
 
     // Загрузка списка: сначала на экране показывается «Загрузка...», потом (после показа кадра) идёт запрос.

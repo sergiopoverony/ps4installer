@@ -72,6 +72,13 @@ sce_module/%.prx:
 	if [ -z "$$src" ]; then echo "Не найден $*.prx в $(TOOLCHAIN). Скопируйте его вручную в pkg/sce_module/"; exit 1; fi; \
 	echo "cp $$src $@"; cp "$$src" $@
 
+# Отправить службу на консоль (GoldHEN BinLoader, порт 9090) прямо из этой папки: make send
+# Адрес консоли: PS4_HOST (по умолчанию 192.168.0.24). Нужен собранный ../build/ps4installerd.elf (make в корне).
+PS4_HOST ?= 192.168.0.24
+.PHONY: send
+send:
+	nc -q0 $(PS4_HOST) 9090 < ../build/ps4installerd.elf
+
 # Служба берётся из корня проекта (сборка: make в корне).
 assets/misc/ps4installerd.elf: ../build/ps4installerd.elf
 	cp $< $@
