@@ -61,7 +61,7 @@ std::string pkg_json(const PkgInfo& p) {
     return "{\"path\":\"" + json_escape(p.path) + "\",\"content_id\":\"" + p.content_id + "\",\"title_id\":\"" +
            p.title_id + "\",\"kind\":\"" + p.kind + "\"," + num + "\"patch\":" + (p.is_patch ? "true" : "false") + ",\"title\":\"" + json_escape(p.title) +
            "\",\"ver\":\"" + json_escape(p.app_ver) + "\",\"backport\":" + (p.backport ? "true" : "false") +
-           ",\"rus\":" + (p.rus ? "true" : "false") + ",\"dlc_name\":" + (p.dlc_name ? "true" : "false") + "}";
+           ",\"incomplete\":" + (p.incomplete() ? "true" : "false") + ",\"rus\":" + (p.rus ? "true" : "false") + ",\"dlc_name\":" + (p.dlc_name ? "true" : "false") + "}";
 }
 
 Response route(const Request& rq) {

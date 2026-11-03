@@ -282,9 +282,20 @@ EnqueueResult enqueue(const std::vector<std::string>& paths) {
         }
         list.push_back(info);
     }
+    std::vector<SkippedPkg> skipped;
+    {
+        std::vector<PkgInfo> ok;
+        for (const PkgInfo& e : list) {
+            if (e.incomplete()) {  // недокачанный файл ставить нельзя
+                skipped.push_back(SkippedPkg{e, "incomplete"});
+            } else {
+                ok.push_back(e);
+            }
+        }
+        list = ok;
+    }
     std::string fw_str;
     int fw_major = platform::firmware_major(&fw_str);
-    std::vector<SkippedPkg> skipped;
     list = plan_install(list, fw_major, &skipped);
     for (const SkippedPkg& sk : skipped) {
         log_printf("enqueue: пропущен %s (%s)", sk.pkg.path.c_str(), sk.reason.c_str());

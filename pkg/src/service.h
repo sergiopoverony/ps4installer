@@ -11,7 +11,7 @@
 struct PkgItem {
     std::string path, content_id, title_id, kind, title, ver;
     uint64_t size = 0;
-    bool patch = false, backport = false, rus = false, dlc_name = false;
+    bool patch = false, backport = false, rus = false, dlc_name = false, incomplete = false;
 };
 
 // GET /scan. false и текст в err, если служба не ответила или ответ непонятен.

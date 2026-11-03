@@ -25,6 +25,8 @@ struct PkgInfo {
     uint32_t flags = 0;
     std::string kind;        // game | patch | dlc | dlc_nodata | delta_patch
     bool is_patch = false;
+    // Файл меньше, чем записано в заголовке: докачан не до конца (сравнение не проверено на всех PKG).
+    bool incomplete() const { return pkg_size > 0 && file_size < pkg_size; }
     // из param.sfo внутри PKG (необязательно: пусто, если прочитать не удалось)
     std::string title;       // TITLE
     std::string app_ver;     // APP_VER, например "01.04"

@@ -328,6 +328,20 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(statuses[0], "done")
         self.assertIn("cancelled", statuses[1:])
 
+    def test_incomplete_pkg_is_skipped(self):
+        p = make_pkg(DATA_PKG / "half.pkg", "UP0001-CUSA00081_00-HALFHALFHALFHALF", 0x4000)
+        data = bytearray(open(p, "rb").read())
+        data[0x430:0x438] = (0x8000).to_bytes(8, "big")  # в заголовке больше, чем лежит на диске
+        open(p, "wb").write(bytes(data))
+        self.srv = Server(extra=[])
+        scan = self.srv.get("/scan")[1]
+        item = [x for x in scan["packages"] if x["path"] == p][0]
+        self.assertTrue(item["incomplete"])
+        code, j = self.srv.post("/install", {"paths": [p]})
+        self.assertEqual(code, 200)
+        self.assertEqual(j["order"], [])
+        self.assertEqual(j["skipped"][0]["reason"], "incomplete")
+
     def test_queue_appends_second_batch(self):
         a = make_pkg(DATA_PKG / "qa.pkg", "UP0001-CUSA00071_00-QAQAQAQAQAQAQAQA", 0x9000)
         b = make_pkg(DATA_PKG / "qb.pkg", "UP0001-CUSA00072_00-QBQBQBQBQBQBQBQB", 0x5000)

@@ -216,6 +216,7 @@ bool service_scan(std::vector<PkgItem>& out, std::string& err)
         it.size = (uint64_t)p["size"].asNum();
         it.patch = p["patch"].asBool();
         it.backport = p["backport"].asBool();
+        it.incomplete = p["incomplete"].asBool();
         it.rus = p["rus"].asBool();
         it.dlc_name = p["dlc_name"].asBool();
         if (!it.path.empty()) out.push_back(it);
