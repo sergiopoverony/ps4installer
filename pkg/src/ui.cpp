@@ -165,8 +165,10 @@ static void switch_list(int newTab)
 }
 
 // Окна: подтверждение установки и ход установки.
-enum Mode { MODE_GRID = 0, MODE_CONFIRM, MODE_PROGRESS };
+enum Mode { MODE_GRID = 0, MODE_CONFIRM, MODE_PROGRESS, MODE_DELETE };
 static Mode g_mode = MODE_GRID;
+static Mode g_deleteFrom = MODE_GRID;      // откуда открыли подтверждение удаления (сетка или окно игры)
+static std::string g_deleteErr;
 static Game g_sel;                         // выбранная игра
 static std::vector<PkgItem> g_selFiles;    // что будет установлено (по порядку)
 static uint64_t g_selNeed = 0, g_freeBytes = 0;
@@ -583,7 +585,7 @@ static void draw_confirm()
 
     if (g_cardReason == CARD_LAUNCH) {   // окно установленной игры: только запуск
         if (!g_confirmErr.empty()) draw_text(fit_chars(g_confirmErr, maxc), tx, y + H - 130 + 36, C_WARN, C_PANEL);
-        std::string h = "Крест - запустить игру      Круг - закрыть";
+        std::string h = "Крест - запустить игру      Треугольник - удалить      Круг - закрыть";
         draw_text(h, x + (W - text_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
         return;
     }
@@ -619,6 +621,22 @@ static void draw_confirm()
     std::string hint = can ? "Крест - установить      Круг - закрыть" : "Крест - установить (недоступно)      Круг - закрыть";
     if (g_cardReason == CARD_QUEUED) hint += "      Треугольник - ход установки";
     draw_text(hint, x + (W - text_w(hint)) / 2, y + H - 36, can ? C_TEXT : C_DIM, C_PANEL);
+}
+
+static void draw_delete()
+{
+    const int W = 1200, H = 360;
+    int x = (FRAME_WIDTH - W) / 2, y = (FRAME_HEIGHT - H) / 2;
+    draw_panel(x, y, W, H);
+    int maxc = (W - 80) / g_cellW;
+    std::string q = "ТОЧНО УДАЛИТЬ ВЫБРАННУЮ ИГРУ?";
+    draw_text(q, x + (W - text_w(q)) / 2, y + 80, C_TEXT, C_PANEL);
+    std::string t = fit_chars(g_sel.title, maxc);
+    fill(x + 40, y + 120, W - 80, FONT_PX + 24, C_RED_BG);
+    draw_text(t, x + (W - text_w(t)) / 2, y + 120 + FONT_PX + 8, C_TEXT, C_RED_BG);
+    if (!g_deleteErr.empty()) draw_text(fit_chars(g_deleteErr, maxc), x + 40, y + 240, C_WARN, C_PANEL);
+    std::string h = "Крест - да      Круг - НЕТ";
+    draw_text(h, x + (W - text_w(h)) / 2, y + H - 50, C_TEXT, C_PANEL);
 }
 
 static int overall_pct()
@@ -736,7 +754,8 @@ static void draw_all()
         draw_text(body, MARGIN_X, HEAD_H + 120, C_TEXT, C_BG);
     }
 
-    if (g_svc == SVC_OK && g_mode == MODE_CONFIRM) draw_confirm();
+    if (g_svc == SVC_OK && (g_mode == MODE_CONFIRM || (g_mode == MODE_DELETE && g_deleteFrom == MODE_CONFIRM))) draw_confirm();
+    if (g_svc == SVC_OK && g_mode == MODE_DELETE) draw_delete();
     if (g_svc == SVC_OK && g_mode == MODE_PROGRESS) draw_progress();
 
     // Идёт установка, а окно скрыто: короткая строка под сеткой
@@ -749,7 +768,7 @@ static void draw_all()
     // Нижняя строка
     const char* hint = "L1 / R1 - вкладки";
     if (g_tab == TAB_INSTALLED && g_mode == MODE_GRID)
-        hint = "Стрелки / стик - выбор    Крест - открыть    Квадрат - обновить    L1 / R1 - вкладки";
+        hint = "Стрелки / стик - выбор    Крест - открыть    Треугольник - удалить    Квадрат - обновить    L1 / R1 - вкладки";
     else if (g_tab == TAB_AVAILABLE && g_mode == MODE_GRID)
         hint = g_instActive ? "Стрелки / стик - выбор    Крест - в очередь    Треугольник - ход установки    Квадрат - обновить    L1 / R1 - вкладки"
                             : "Стрелки / стик - выбор    Крест - установить    Квадрат - обновить    L1 / R1 - вкладки";
@@ -889,7 +908,13 @@ void ui_pump()
             int dx = (dirs & ORBIS_PAD_BUTTON_RIGHT ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_LEFT ? 1 : 0);
             int dy = (dirs & ORBIS_PAD_BUTTON_DOWN ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_UP ? 1 : 0);
             if ((dx || dy) && g_mode == MODE_GRID) cursor_move(dx, dy);
-            if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_TRIANGLE) && (g_instActive || g_instFinished)) {
+            if (g_mode == MODE_GRID && g_tab == TAB_INSTALLED && (pressed & ORBIS_PAD_BUTTON_TRIANGLE) && !g_games.empty()) {
+                g_sel = g_games[(size_t)g_cursor];
+                g_deleteErr.clear();
+                g_deleteFrom = MODE_GRID;
+                g_mode = MODE_DELETE;
+                g_redraw = 2;
+            } else if (g_mode == MODE_GRID && g_tab == TAB_AVAILABLE && (pressed & ORBIS_PAD_BUTTON_TRIANGLE) && (g_instActive || g_instFinished)) {
                 g_mode = MODE_PROGRESS;
                 g_redraw = 2;
             }
@@ -934,6 +959,12 @@ void ui_pump()
         unsigned cp = g_skipConfirmInput ? 0 : pressed;
         g_skipConfirmInput = false;
         if (cp & ORBIS_PAD_BUTTON_CIRCLE) { info_clear(); g_mode = MODE_GRID; g_redraw = 2; }
+        else if ((cp & ORBIS_PAD_BUTTON_TRIANGLE) && g_cardReason == CARD_LAUNCH) {
+            g_deleteErr.clear();
+            g_deleteFrom = MODE_CONFIRM;
+            g_mode = MODE_DELETE;
+            g_redraw = 2;
+        }
         else if ((cp & ORBIS_PAD_BUTTON_CROSS) && g_cardReason == CARD_LAUNCH) {
             std::string err;
             logf_("ui: запуск игры %s", g_sel.title_id.c_str());
@@ -962,6 +993,23 @@ void ui_pump()
             } else {
                 g_confirmErr = "Не удалось начать установку: " + err;
                 logf_("ui: install error: %s", err.c_str());
+            }
+            g_redraw = 2;
+        }
+    } else if (g_svc == SVC_OK && g_mode == MODE_DELETE) {
+        if (pressed & ORBIS_PAD_BUTTON_CIRCLE) { g_mode = g_deleteFrom; g_redraw = 2; }
+        else if (pressed & ORBIS_PAD_BUTTON_CROSS) {
+            std::string err;
+            logf_("ui: удаление игры %s (%s)", g_sel.title.c_str(), g_sel.title_id.c_str());
+            if (service_uninstall(g_sel.title_id, err)) {
+                logf_("ui: игра удалена");
+                info_clear();
+                g_mode = MODE_GRID;
+                g_load = LS_LOADING;   // перечитать список
+                mark_installed();
+            } else {
+                g_deleteErr = "Не удалось удалить: " + err;
+                logf_("ui: удаление не удалось: %s", err.c_str());
             }
             g_redraw = 2;
         }

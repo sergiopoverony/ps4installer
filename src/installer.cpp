@@ -393,6 +393,11 @@ void cancel_pending() {
     }
 }
 
+bool is_busy() {
+    std::lock_guard<std::mutex> lk(g_mu);
+    return any_active_locked();
+}
+
 std::string status_json() {
     std::string o = "{\"version\":\"" APP_VERSION "\",";
     std::lock_guard<std::mutex> lk(g_mu);

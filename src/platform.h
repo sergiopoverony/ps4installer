@@ -23,6 +23,8 @@ std::vector<InstalledGame> installed_games();
 std::string app_icon_path(const std::string& title_id);
 // Запуск установленной игры. Не проверено на консоли. На ПК: пишет Title ID в файл FAKE_LAUNCH_LOG.
 bool launch_app(const std::string& title_id, std::string* err);
+// Удаление установленной игры вместе с данными. Не проверено на консоли. На ПК: пишет Title ID в FAKE_UNINSTALL_LOG.
+bool uninstall_app(const std::string& title_id, std::string* err);
 void power_tick();                    // не давать консоли уйти в сон на время установки
 bool free_bytes(const char* path, uint64_t* out);
 

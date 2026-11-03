@@ -102,6 +102,21 @@ bool launch_app(const std::string& title_id, std::string* err) {
     }
     return true;
 }
+bool uninstall_app(const std::string& title_id, std::string* err) {
+    const char* lg = getenv("FAKE_UNINSTALL_LOG");
+    if (title_id.find("FAIL") != std::string::npos) {
+        *err = "fake uninstall failure";
+        return false;
+    }
+    if (lg) {
+        FILE* f = fopen(lg, "a");
+        if (f) {
+            fprintf(f, "%s\n", title_id.c_str());
+            fclose(f);
+        }
+    }
+    return true;
+}
 void power_tick() {}
 
 bool free_bytes(const char* path, uint64_t* out) {
@@ -360,6 +375,40 @@ bool launch_app(const std::string& title_id, std::string* err) {
     if (r != 0) {
         char b[64];
         snprintf(b, sizeof(b), "ошибка запуска 0x%08X", (unsigned)r);
+        *err = b;
+        return false;
+    }
+    return true;
+}
+
+typedef int (*fn_appinst_init_t)(void);
+typedef int (*fn_appinst_uninstall_t)(const char*);
+
+bool uninstall_app(const std::string& title_id, std::string* err) {
+    static fn_appinst_uninstall_t un = nullptr;
+    if (!un) {
+        static const char* dirs[] = {"/system/common/lib/", "/system/priv/lib/", "/system_ex/common_ex/lib/"};
+        for (const char* d : dirs) {
+            void* h = dlopen((std::string(d) + "libSceAppInstUtil.sprx").c_str(), 0);
+            if (!h) continue;
+            fn_appinst_init_t init = (fn_appinst_init_t)dlsym(h, "sceAppInstUtilInitialize");
+            un = (fn_appinst_uninstall_t)dlsym(h, "sceAppInstUtilAppUnInstall");
+            if (un) {
+                int r = init ? init() : 0;
+                log_printf("AppInstUtil init -> 0x%08X", (unsigned)r);   // 0x80A30018 - уже инициализирована, это нормально
+                break;
+            }
+        }
+    }
+    if (!un) {
+        *err = "sceAppInstUtilAppUnInstall не найдена";
+        return false;
+    }
+    int r = un(title_id.c_str());
+    log_printf("uninstall %s -> 0x%08X", title_id.c_str(), (unsigned)r);
+    if (r != 0) {
+        char b[64];
+        snprintf(b, sizeof(b), "ошибка удаления 0x%08X", (unsigned)r);
         *err = b;
         return false;
     }

@@ -45,6 +45,8 @@ bool service_installed_games(std::vector<std::pair<std::string, std::string> >& 
 bool service_app_icon(const std::string& titleId, std::string& png);
 // POST /launch: запуск установленной игры. В err причина отказа.
 bool service_launch(const std::string& titleId, std::string& err);
+// POST /uninstall: удалить установленную игру. В err причина отказа.
+bool service_uninstall(const std::string& titleId, std::string& err);
 
 // POST /install. true, если служба приняла очередь. При отказе в err текст причины (detail службы).
 // skipped: что служба решила не ставить (backport, старые патчи) и почему.

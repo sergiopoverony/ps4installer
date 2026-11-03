@@ -394,6 +394,18 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.srv.post("/launch", {"title_ids": []})[0], 400)
         self.assertEqual(self.srv.get("/launch")[0], 405)
 
+    def test_uninstall(self):
+        import tempfile
+        d = tempfile.mkdtemp()
+        log = d + "/un.log"
+        self.srv = Server(env={"FAKE_INSTALLED": "CUSA00001:A,CUSA00003FAIL", "FAKE_UNINSTALL_LOG": log})
+        self.assertEqual(self.srv.post("/uninstall", {"title_ids": ["CUSA00001"]})[0], 200)
+        self.assertEqual(open(log).read().split(), ["CUSA00001"])
+        self.assertEqual(self.srv.post("/uninstall", {"title_ids": ["CUSA99999"]})[0], 404)   # не установлена
+        self.assertEqual(self.srv.post("/uninstall", {"title_ids": ["CUSA00003FAIL"]})[0], 500)
+        self.assertEqual(self.srv.post("/uninstall", {"title_ids": ["A", "B"]})[0], 400)
+        self.assertEqual(self.srv.get("/uninstall")[0], 405)
+
     def test_scan_is_cached(self):
         a = make_pkg(DATA_PKG / "ca.pkg", "UP0001-CUSA00101_00-CACHECACHECACHE1", 0x2000)
         self.srv = Server(env={"PS4I_SCAN_CACHE_SEC": "30"})

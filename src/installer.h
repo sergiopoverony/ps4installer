@@ -25,6 +25,9 @@ EnqueueResult enqueue(const std::vector<std::string>& paths);
 // Снимает с очереди всё, что ещё не начато (текущая установка продолжается).
 void cancel_pending();
 
+// Идёт ли установка (или есть что-то в очереди).
+bool is_busy();
+
 // Состояние очереди и последних строк журнала в виде JSON.
 std::string status_json();
 

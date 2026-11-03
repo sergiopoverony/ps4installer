@@ -125,6 +125,16 @@ bool service_launch(const std::string& titleId, std::string& err)
     return true;
 }
 
+bool service_uninstall(const std::string& titleId, std::string& err)
+{
+    HttpResult r = http_post(SERVICE_HOST, SERVICE_PORT, "/uninstall", "{\"title_ids\":[" + json_quote(titleId) + "]}", 60000);
+    if (!r.connected) { err = "служба не отвечает"; return false; }
+    JsonValue j;
+    if (!json_parse(r.body, j)) { err = "http " + std::to_string(r.status); return false; }
+    if (!j["ok"].asBool()) { err = j["detail"].asStr(j["error"].asStr("error")); return false; }
+    return true;
+}
+
 bool service_install(const std::vector<std::string>& paths, std::string& err, std::vector<std::string>* skipped)
 {
     std::string body = "{\"paths\":[";

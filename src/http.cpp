@@ -179,6 +179,21 @@ Response route(const Request& rq) {
         r.body = "{\"ok\":true}";
         return r;
     }
+    if (rq.path == "/uninstall") {
+        if (rq.method != "POST") return json_error(405, "method", "нужен POST");
+        std::vector<std::string> ids;
+        if (!json_get_string_array(rq.body, "title_ids", &ids) || ids.size() != 1)
+            return json_error(400, "bad_request", "ожидается {\"title_ids\":[\"CUSA00000\"]}");
+        bool known = false;
+        for (const std::string& t : platform::installed_title_ids()) known = known || t == ids[0];
+        if (!known) return json_error(404, "not_installed", ids[0]);
+        if (installer::is_busy()) return json_error(409, "busy", "идёт установка: подождите её окончания");
+        std::string err;
+        log_printf("uninstall request: %s", ids[0].c_str());
+        if (!platform::uninstall_app(ids[0], &err)) return json_error(500, "uninstall_failed", err);
+        r.body = "{\"ok\":true}";
+        return r;
+    }
     if (rq.path == "/icon") {
         size_t k = rq.query.find("path=");
         std::string p = k == std::string::npos ? "" : url_decode(rq.query.substr(k + 5));
