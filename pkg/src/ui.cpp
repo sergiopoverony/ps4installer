@@ -441,7 +441,7 @@ static void draw_progress()
             break;
         }
         if (header) {
-            if (!lastGame.empty() && lastGame != "\x01") { fill(tx, ty - 6, W - 80, 2, C_EDGE); ty += 8; }
+            if (!lastGame.empty() && lastGame != "\x01") ty += 14;   // просто пустой промежуток между играми
             draw_text(fit_chars(gt, maxc - 4), tx, ty, C_WARN, C_PANEL);
             ty += FONT_PX + 10;
             lastGame = gt;

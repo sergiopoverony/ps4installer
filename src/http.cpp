@@ -57,7 +57,7 @@ Response json_error(int code, const std::string& error, const std::string& detai
 
 std::string pkg_json(const PkgInfo& p) {
     char num[96];
-    snprintf(num, sizeof(num), "\"size\":%llu,", (unsigned long long)p.file_size);
+    snprintf(num, sizeof(num), "\"size\":%llu,\"pkg_size\":%llu,", (unsigned long long)p.file_size, (unsigned long long)p.pkg_size);
     return "{\"path\":\"" + json_escape(p.path) + "\",\"content_id\":\"" + p.content_id + "\",\"title_id\":\"" +
            p.title_id + "\",\"kind\":\"" + p.kind + "\"," + num + "\"patch\":" + (p.is_patch ? "true" : "false") + ",\"title\":\"" + json_escape(p.title) +
            "\",\"ver\":\"" + json_escape(p.app_ver) + "\",\"backport\":" + (p.backport ? "true" : "false") +
