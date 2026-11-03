@@ -7,6 +7,8 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <chrono>
+#include <mutex>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -80,8 +82,12 @@ std::string url_decode(const std::string& s) {
 }
 
 Response route(const Request& rq) {
-    if (rq.path != "/status" && rq.path != "/health" && rq.path != "/icon") {  // опрос состояния не засоряет журнал
+    if (rq.path != "/status" && rq.path != "/health") {  // опрос состояния не засоряет журнал
         log_printf("http: %s %s (тело %d байт)", rq.method.c_str(), rq.path.c_str(), (int)rq.body.size());
+    }
+    {
+        std::string ctx = rq.method + " " + rq.path + (rq.query.empty() ? "" : "?" + rq.query.substr(0, 120));
+        log_set_context(ctx.c_str());
     }
     Response r;
     if (rq.path == "/health") {
@@ -94,13 +100,32 @@ Response route(const Request& rq) {
         return r;
     }
     if (rq.path == "/scan") {
-        std::vector<PkgInfo> list = scan_packages(3000);
-        sort_by_size(&list);
-        r.body = "{\"ok\":true,\"count\":" + std::to_string(list.size()) + ",\"packages\":[";
-        for (size_t i = 0; i < list.size(); i++) {
-            r.body += (i ? "," : "") + pkg_json(list[i]);
+        // Сканирование тяжёлое (читает флешки), поэтому: одновременно идёт только одно, а ответ
+        // запоминается на 30 секунд. Принудительное обновление: /scan?fresh=1 (кнопка «Квадрат»).
+        static std::mutex scan_mu;
+        static std::string cached;
+        static std::chrono::steady_clock::time_point cached_at;
+        bool fresh = rq.query.find("fresh=1") != std::string::npos;
+        std::lock_guard<std::mutex> lk(scan_mu);
+        auto now = std::chrono::steady_clock::now();
+        const char* ttl_env = getenv("PS4I_SCAN_CACHE_SEC");   // в тестах 0 (кэша нет)
+        int ttl = ttl_env ? atoi(ttl_env) : 30;
+        long age = cached.empty() ? 1000000 : (long)std::chrono::duration_cast<std::chrono::seconds>(now - cached_at).count();
+        bool usable = ttl > 0 && age < ttl;
+        if (usable && fresh && age >= 3) {
+            usable = false;   // «Квадрат»: свежие данные, но не чаще чем раз в 3 секунды
         }
-        r.body += "]}";
+        if (!usable) {
+            std::vector<PkgInfo> list = scan_packages(3000);
+            sort_by_size(&list);
+            cached = "{\"ok\":true,\"count\":" + std::to_string(list.size()) + ",\"packages\":[";
+            for (size_t i = 0; i < list.size(); i++) {
+                cached += (i ? "," : "") + pkg_json(list[i]);
+            }
+            cached += "]}";
+            cached_at = std::chrono::steady_clock::now();
+        }
+        r.body = cached;
         return r;
     }
     if (rq.path == "/free") {
@@ -224,7 +249,7 @@ bool read_request(int fd, Request* rq) {
 void send_all(int fd, const std::string& s) {
     size_t off = 0;
     while (off < s.size()) {
-        ssize_t n = send(fd, s.data() + off, s.size() - off, 0);
+        ssize_t n = send(fd, s.data() + off, s.size() - off, MSG_NOSIGNAL);
         if (n <= 0) {
             return;
         }
@@ -241,12 +266,19 @@ void handle_client(int fd) {
     tv.tv_usec = 0;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     Request rq;
-    if (read_request(fd, &rq)) {
-        Response r = route(rq);
-        std::string out = "HTTP/1.1 " + std::to_string(r.code) + " " + reason(r.code) +
-                          "\r\nContent-Type: " + r.content_type + "\r\nContent-Length: " +
-                          std::to_string(r.body.size()) + "\r\nConnection: close\r\n\r\n" + r.body;
-        send_all(fd, out);
+    try {
+        if (read_request(fd, &rq)) {
+            Response r = route(rq);
+            std::string head = "HTTP/1.1 " + std::to_string(r.code) + " " + reason(r.code) +
+                               "\r\nContent-Type: " + r.content_type + "\r\nContent-Length: " +
+                               std::to_string(r.body.size()) + "\r\nConnection: close\r\n\r\n";
+            send_all(fd, head);
+            send_all(fd, r.body);   // без лишней копии большого тела (иконки)
+        }
+    } catch (const std::exception& e) {   // например, не хватило памяти: не роняем всю службу
+        log_printf("http: ошибка при обработке %s %s: %s", rq.method.c_str(), rq.path.c_str(), e.what());
+    } catch (...) {
+        log_printf("http: неизвестная ошибка при обработке %s", rq.path.c_str());
     }
     close(fd);
     g_active_clients--;

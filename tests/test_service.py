@@ -68,6 +68,7 @@ class Server:
         self.port = port or free_port()
         e = dict(os.environ)
         e["ASAN_OPTIONS"] = "detect_leaks=0"
+        e["PS4I_SCAN_CACHE_SEC"] = "0"   # без кэша /scan (кроме теста кэша)
         e.update(env or {})
         self.proc = subprocess.Popen([str(BIN), "--port", str(self.port), "--poll-ms", "50"] + list(extra),
                                      env=e, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -367,6 +368,15 @@ class ServiceTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as cm:
             urllib.request.urlopen("http://127.0.0.1:%d/icon?path=%s" % (self.srv.port, urllib.parse.quote("/etc/passwd")))
         self.assertEqual(cm.exception.code, 404)
+
+    def test_scan_is_cached(self):
+        a = make_pkg(DATA_PKG / "ca.pkg", "UP0001-CUSA00101_00-CACHECACHECACHE1", 0x2000)
+        self.srv = Server(env={"PS4I_SCAN_CACHE_SEC": "30"})
+        n1 = self.srv.get("/scan")[1]["count"]
+        make_pkg(DATA_PKG / "cb.pkg", "UP0001-CUSA00102_00-CACHECACHECACHE2", 0x2000)
+        self.assertEqual(self.srv.get("/scan")[1]["count"], n1)   # из кэша
+        time.sleep(3.2)
+        self.assertEqual(self.srv.get("/scan?fresh=1")[1]["count"], n1 + 1)   # принудительное обновление
 
     def test_queue_appends_second_batch(self):
         a = make_pkg(DATA_PKG / "qa.pkg", "UP0001-CUSA00071_00-QAQAQAQAQAQAQAQA", 0x9000)

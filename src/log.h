@@ -9,6 +9,8 @@
 void log_open(const char* dir);
 // Записать в журнал номер сигнала при аварии (SIGSEGV и др.) и завершиться.
 void log_install_crash_handler();
+// Что делала служба в момент аварии (последний запрос): печатается вместе с номером сигнала.
+void log_set_context(const char* what);
 void log_printf(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
 // Последние строки журнала (для /status).
 std::vector<std::string> log_tail(size_t max_lines);

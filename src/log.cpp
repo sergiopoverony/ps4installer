@@ -1,3 +1,4 @@
+#include <cstring>
 #include "log.h"
 
 #include <sys/stat.h>
@@ -64,12 +65,21 @@ std::vector<std::string> log_tail(size_t max_lines) {
 
 // В обработчике аварии нельзя пользоваться мьютексом и fprintf: пишем напрямую в файл.
 static int g_crash_fd = -1;
+static char g_context[200] = "";
+
+void log_set_context(const char* what) {
+    snprintf(g_context, sizeof(g_context), "%s", what ? what : "");
+}
 
 static void crash_handler(int sig) {
+    signal(sig, SIG_DFL);   // второй сбой внутри обработчика не должен зациклить запись
     char buf[64];
     int n = snprintf(buf, sizeof(buf), "АВАРИЯ: сигнал %d\n", sig);
     if (g_crash_fd >= 0 && n > 0) {
         (void)write(g_crash_fd, buf, (size_t)n);
+        (void)write(g_crash_fd, "  запрос: ", 12);
+        (void)write(g_crash_fd, g_context, strlen(g_context));
+        (void)write(g_crash_fd, "\n", 1);
         fsync(g_crash_fd);
     }
     _exit(128 + sig);

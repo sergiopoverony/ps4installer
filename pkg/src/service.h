@@ -15,7 +15,7 @@ struct PkgItem {
 };
 
 // GET /scan. false и текст в err, если служба не ответила или ответ непонятен.
-bool service_scan(std::vector<PkgItem>& out, std::string& err);
+bool service_scan(std::vector<PkgItem>& out, std::string& err, bool fresh = false);
 
 // Спрашивает /health. true, если служба ответила; version = её версия.
 bool service_query(std::string& version);

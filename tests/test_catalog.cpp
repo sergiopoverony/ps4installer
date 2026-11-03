@@ -19,6 +19,15 @@ int main(int argc, char** argv)
     CHECK(catalog_by_title_id("CUSA99999") == nullptr);
     std::string t = catalog_text(*e);
     CHECK(t == "Line one line two");
+    // поиск по названию: без регистра и знаков; русские буквы тоже
+    CHECK(catalog_by_name("TEST game\xE2\x84\xA2!") == e);
+    CHECK(catalog_by_name("\xD0\xA2\xD0\x95\xD0\xA1\xD0\xA2") == e);   // «ТЕСТ»
+    CHECK(catalog_by_name("Nothing here") == nullptr);
+    const char* how = "";
+    CHECK(catalog_find("CUSA00000", "test game", &how) == e);
+    CHECK(std::string(how) == "name");
+    CHECK(catalog_find("CUSA18535", "whatever", &how) == e);
+    CHECK(std::string(how) == "id");
     CatImage img;
     CHECK(catalog_image(e->cover, 120, 80, img));
     CHECK(img.ok() && img.w == 120 && img.h == 80);

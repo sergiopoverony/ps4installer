@@ -178,6 +178,9 @@ static uint64_t pending_bytes()
     return n;
 }
 static uint64_t g_lastPoll = 0;
+static bool g_freshScan = false;           // Квадрат: просим у службы свежее сканирование
+static int g_cardReason = 0;               // 0 - можно ставить; иначе почему кнопка установки неактивна
+enum { CARD_OK = 0, CARD_INSTALLED, CARD_INCOMPLETE, CARD_QUEUED };
 static bool g_skipConfirmInput = false;   // то же нажатие Креста, что открыло окно, не считается «Установить»
 
 static void mark_installed()
@@ -191,11 +194,11 @@ static void mark_installed()
     }
 }
 
-static void load_games()
+static void load_games(bool fresh = false)
 {
     std::vector<PkgItem> items;
     std::string err;
-    if (service_scan(items, err)) {
+    if (service_scan(items, err, fresh)) {
         build_games(items, g_games);
         g_tileImg.clear(); g_tileTried.clear();
         for (size_t i = 0; i < g_games.size(); i++)
@@ -222,10 +225,15 @@ static void blit(const CatImage& im, int x, int y);
 
 static bool load_game_image(const Game& g, int w, int h, CatImage& out)
 {
-    const CatEntry* e = catalog_by_title_id(g.title_id);
+    const CatEntry* e = catalog_find(g.title_id, g.title);
     if (e && catalog_image(e->cover, w, h, out)) return true;
     std::string png;
-    if (!g.path.empty() && service_icon(g.path, png) && catalog_image_from_blob(png, w, h, out)) return true;
+    if (!g.path.empty() && service_icon(g.path, png)) {
+        if (catalog_image_from_blob(png, w, h, out)) return true;
+        logf_("ui: иконка из PKG не разобрана (%d байт): %s", (int)png.size(), g.title.c_str());
+    } else {
+        logf_("ui: нет картинки для %s (каталог: %s, иконка из PKG: нет)", g.title.c_str(), e ? "обложка не читается" : "игры нет");
+    }
     return false;
 }
 
@@ -276,7 +284,7 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
 
     // Уже установлена: полоса поверх картинки
     if (g.installed) {
-        std::string m = "УЖЕ УСТАНОВЛЕНА";
+        std::string m = "УЖЕ УСТАНОВЛЕНО";
         int w = text_w(m) + 16;
         int mx = x + (TILE_W - w) / 2, my = y + IMG_H / 2 - (FONT_PX + 16) / 2;
         fill(mx, my, w, FONT_PX + 16, C_GREEN);
@@ -411,12 +419,14 @@ static void info_clear()
 static void info_load(const Game& g)
 {
     info_clear();
-    g_selCat = catalog_by_title_id(g.title_id);
+    const char* how = "";
+    g_selCat = catalog_find(g.title_id, g.title, &how);
     if (!g_selCat) {
-        logf_("ui: в каталоге нет %s", g.title_id.c_str());
+        logf_("ui: в каталоге нет %s (%s)", g.title_id.c_str(), g.title.c_str());
         load_game_image(g, COVER_W, COVER_H, g_imgCover);   // хотя бы иконка из самого PKG
         return;
     }
+    logf_("ui: найдено в каталоге по %s: %s", how, g_selCat->name_en.c_str());
     catalog_image(g_selCat->cover, COVER_W, COVER_H, g_imgCover);
     for (int i = 0; i < SHOT_N && i < (int)g_selCat->shots.size(); i++)
         catalog_image(g_selCat->shots[(size_t)i], SHOT_W, SHOT_H, g_imgShots[i]);
@@ -497,19 +507,29 @@ static void draw_confirm()
     draw_text("Всего нужно: " + fmt_size(g_selNeed), tx, ty, C_TEXT, C_PANEL);
     ty += FONT_PX + 10;
     if (g_freeOk) draw_text("Свободно на консоли: " + fmt_size(g_freeBytes), tx, ty, C_TEXT, C_PANEL);
-    else draw_text("Свободное место узнать не удалось", tx, ty, C_WARN, C_PANEL);
+    else draw_text("Свободное место узнать не удалось (нет связи со службой)", tx, ty, C_WARN, C_PANEL);
 
-    bool low = g_freeOk && g_selNeed > g_freeBytes;
+    bool low = g_cardReason == CARD_OK && g_freeOk && g_selNeed > g_freeBytes;
     int by = y + H - 110;
-    if (low) {
+    if (g_cardReason != CARD_OK) {
+        const char* msg = g_cardReason == CARD_INSTALLED ? "УЖЕ УСТАНОВЛЕНО" :
+                          g_cardReason == CARD_INCOMPLETE ? "НЕ ДОКАЧАНО - ДОЖДИТЕСЬ ЗАГРУЗКИ ФАЙЛОВ" : "УЖЕ В ОЧЕРЕДИ НА УСТАНОВКУ";
+        Color bg = g_cardReason == CARD_INCOMPLETE ? C_RED_BG : g_cardReason == CARD_INSTALLED ? C_GREEN : C_WARN;
+        Color fg = g_cardReason == CARD_INCOMPLETE ? C_TEXT : C_BG;
+        fill(tx, by, W - 80, 52, bg);
+        std::string m = msg;
+        draw_text(m, x + (W - text_w(m)) / 2, by + 36, fg, bg);
+    } else if (low) {
         fill(tx, by, W - 80, 52, C_RED_BG);
         std::string msg = "МАЛО МЕСТА - УДАЛИТЕ НЕНУЖНУЮ ИГРУ";
         draw_text(msg, x + (W - text_w(msg)) / 2, by + 36, C_TEXT, C_RED_BG);
     } else if (!g_confirmErr.empty()) {
         draw_text(fit_chars(g_confirmErr, maxc), tx, by + 36, C_WARN, C_PANEL);
     }
-    std::string hint = low ? "Круг - закрыть" : "Крест - установить      Круг - закрыть";
-    draw_text(hint, x + (W - text_w(hint)) / 2, y + H - 36, low ? C_DIM : C_TEXT, C_PANEL);
+    bool can = g_cardReason == CARD_OK && !low;
+    std::string hint = can ? "Крест - установить      Круг - закрыть" : "Крест - установить (недоступно)      Круг - закрыть";
+    if (g_cardReason == CARD_QUEUED) hint += "      Треугольник - ход установки";
+    draw_text(hint, x + (W - text_w(hint)) / 2, y + H - 36, can ? C_TEXT : C_DIM, C_PANEL);
 }
 
 static int overall_pct()
@@ -766,7 +786,8 @@ void ui_pump()
         g_redraw = 2;
     }
     if (g_svc == SVC_OK && g_tab == TAB_AVAILABLE) {
-        if ((first || (pressed & ORBIS_PAD_BUTTON_SQUARE)) && g_load != LS_LOADING) {
+        if ((first || (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_SQUARE))) && g_load != LS_LOADING) {
+            g_freshScan = !first;
             first = false;
             g_load = LS_LOADING;
             g_redraw = 2;
@@ -780,33 +801,39 @@ void ui_pump()
                 g_redraw = 2;
             }
             if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
-                if (g_games[(size_t)g_cursor].installed || g_games[(size_t)g_cursor].incomplete) {
-                    // уже установлена или докачана не до конца: не ставим
-                } else if (g_instActive && game_queued(g_games[(size_t)g_cursor])) {
-                    g_mode = MODE_PROGRESS;                       // она уже в очереди: показываем ход
+                // Карточка открывается для любой игры; если ставить нельзя, неактивна только кнопка установки.
+                g_sel = g_games[(size_t)g_cursor];
+                g_cardReason = g_sel.installed ? CARD_INSTALLED : g_sel.incomplete ? CARD_INCOMPLETE
+                             : (g_instActive && game_queued(g_sel)) ? CARD_QUEUED : CARD_OK;
+                g_selFiles = install_files(g_sel, service_fw_major());
+                g_selNeed = install_bytes(g_sel, service_fw_major()) + (g_instActive ? pending_bytes() : 0);
+                g_freeOk = service_free(g_freeBytes);
+                if (!g_freeOk) g_freeOk = service_free(g_freeBytes);   // одна повторная попытка
+                if (!g_freeOk) {   // служба пропала (упала или закрыта): запускаем заново, как при старте приложения
+                    logf_("ui: служба не отвечает, перезапускаем");
+                    g_svc = SVC_CHECK;
+                    g_svcDrawn = false;
+                    g_redraw = 2;
                 } else {
-                    g_sel = g_games[(size_t)g_cursor];
-                    g_selFiles = install_files(g_sel, service_fw_major());
-                    g_selNeed = install_bytes(g_sel, service_fw_major()) + (g_instActive ? pending_bytes() : 0);
-                    g_freeOk = service_free(g_freeBytes);
-                    g_confirmErr.clear();
-                    info_load(g_sel);
-                    g_mode = MODE_CONFIRM;
-                    g_skipConfirmInput = true;
-                    logf_("ui: окно установки: %s, нужно %llu, свободно %llu (ok=%d)", g_sel.title.c_str(),
-                          (unsigned long long)g_selNeed, (unsigned long long)g_freeBytes, g_freeOk ? 1 : 0);
-                }
+                g_confirmErr.clear();
+                info_load(g_sel);
+                g_mode = MODE_CONFIRM;
+                g_skipConfirmInput = true;
+                logf_("ui: карточка: %s, причина=%d, нужно %llu, свободно %llu (ok=%d)", g_sel.title.c_str(), g_cardReason,
+                      (unsigned long long)g_selNeed, (unsigned long long)g_freeBytes, g_freeOk ? 1 : 0);
                 g_redraw = 2;
+                }
             }
         }
     }
 
     if (g_svc == SVC_OK && g_mode == MODE_CONFIRM) {
-        bool low = g_freeOk && g_selNeed > g_freeBytes;
+        bool low = g_cardReason == CARD_OK && g_freeOk && g_selNeed > g_freeBytes;
         unsigned cp = g_skipConfirmInput ? 0 : pressed;
         g_skipConfirmInput = false;
         if (cp & ORBIS_PAD_BUTTON_CIRCLE) { info_clear(); g_mode = MODE_GRID; g_redraw = 2; }
-        else if ((cp & ORBIS_PAD_BUTTON_CROSS) && !low) {
+        else if ((cp & ORBIS_PAD_BUTTON_TRIANGLE) && g_cardReason == CARD_QUEUED) { info_clear(); g_mode = MODE_PROGRESS; g_redraw = 2; }
+        else if ((cp & ORBIS_PAD_BUTTON_CROSS) && !low && g_cardReason == CARD_OK) {
             std::vector<std::string> paths;
             for (size_t i = 0; i < g_selFiles.size(); i++) paths.push_back(g_selFiles[i].path);
             std::string err;
@@ -895,7 +922,8 @@ void ui_pump()
 
     // Загрузка списка: сначала на экране показывается «Загрузка...», потом (после показа кадра) идёт запрос.
     if (drew && g_load == LS_LOADING && g_redraw == 1) {
-        load_games();
+        load_games(g_freshScan);
+        g_freshScan = false;
         g_redraw = 2;
     }
 }

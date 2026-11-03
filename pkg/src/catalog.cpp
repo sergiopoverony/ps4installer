@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_BMP
@@ -82,6 +83,47 @@ const CatEntry* catalog_by_title_id(const std::string& title_id)
     for (size_t i = 0; i < g_entries.size(); i++)
         if (g_entries[i].title_id == title_id) return &g_entries[i];
     return nullptr;
+}
+
+// Ключ названия: только буквы и цифры (латиница и кириллица в нижнем регистре); ™ ® ' : - и пробелы отбрасываются.
+static std::string name_key(const std::string& s)
+{
+    std::string k;
+    for (size_t i = 0; i < s.size(); i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c < 0x80) { if (isalnum(c)) k += (char)tolower(c); }
+        else if (c == 0xD0 || c == 0xD1) {          // кириллица: приводим заглавные к строчным
+            if (i + 1 < s.size()) {
+                unsigned char d = (unsigned char)s[i + 1];
+                if (c == 0xD0 && d >= 0x90 && d <= 0x9F) { k += (char)0xD0; k += (char)(d + 0x20); }
+                else if (c == 0xD0 && d >= 0xA0 && d <= 0xAF) { k += (char)0xD1; k += (char)(d - 0x20); }
+                else { k += (char)c; k += (char)d; }
+                i++;
+            }
+        } else if (c >= 0xC0) {                      // остальные многобайтовые символы (™ и т.п.) пропускаем целиком
+            int n = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : 1;
+            i += (size_t)n;
+        }
+    }
+    return k;
+}
+
+const CatEntry* catalog_by_name(const std::string& name)
+{
+    std::string k = name_key(name);
+    if (k.size() < 3) return nullptr;
+    for (size_t i = 0; i < g_entries.size(); i++)
+        if (name_key(g_entries[i].name_en) == k || (!g_entries[i].name_ru.empty() && name_key(g_entries[i].name_ru) == k)) return &g_entries[i];
+    return nullptr;
+}
+
+const CatEntry* catalog_find(const std::string& title_id, const std::string& name, const char** how)
+{
+    const CatEntry* e = catalog_by_title_id(title_id);
+    if (e) { if (how) *how = "id"; return e; }
+    e = catalog_by_name(name);
+    if (e && how) *how = "name";
+    return e;
 }
 
 static bool read_blob(const CatRef& r, std::string& out)

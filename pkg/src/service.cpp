@@ -209,10 +209,11 @@ bool service_install_autorun(std::string& err)
     return true;
 }
 
-bool service_scan(std::vector<PkgItem>& out, std::string& err)
+bool service_scan(std::vector<PkgItem>& out, std::string& err, bool fresh)
 {
     out.clear();
-    HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, "/scan", 8000);
+    // Сканирование флешек при занятой консоли может идти долго: ждём до 90 секунд.
+    HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, fresh ? "/scan?fresh=1" : "/scan", 90000);
     if (!r.connected) { err = "no_service"; return false; }
     if (r.status != 200) { err = "http " + std::to_string(r.status); return false; }
     JsonValue j;

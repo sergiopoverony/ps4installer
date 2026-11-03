@@ -19,6 +19,10 @@ bool catalog_load(const std::string& dir);
 int catalog_count();
 const CatEntry* catalog_by_title_id(const std::string& title_id);
 const CatEntry* catalog_at(int i);
+// Поиск по названию игры (без регистра, знаков и ™®): запасной вариант, если Title ID в каталоге другого региона.
+const CatEntry* catalog_by_name(const std::string& name);
+// Сначала по Title ID, потом по названию. what (необязательно) получает "id" / "name".
+const CatEntry* catalog_find(const std::string& title_id, const std::string& name, const char** how = nullptr);
 
 // Текст описания (UTF-8, переводы строк заменены пробелами). Пусто, если описания нет.
 std::string catalog_text(const CatEntry& e);
