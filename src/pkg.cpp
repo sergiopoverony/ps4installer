@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <map>
+#include <mutex>
 #include <cstdio>
 #include <cerrno>
 #include <cstring>
@@ -208,11 +209,16 @@ void pkg_apply_name_tags(PkgInfo* p) {
 }
 
 int pkg_probe_zeros(const std::string& path, uint64_t size, long mtime) {
+    // /scan может идти из нескольких потоков одновременно (двойное нажатие «обновить»): кэш под замком.
     static std::map<std::string, int> cache;
+    static std::mutex mu;
     std::string key = path + "|" + std::to_string(size) + "|" + std::to_string(mtime);
-    auto it = cache.find(key);
-    if (it != cache.end()) {
-        return it->second;
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        auto it = cache.find(key);
+        if (it != cache.end()) {
+            return it->second;
+        }
     }
     int zeros = 0;
     const uint64_t BLK = 4096;
@@ -241,7 +247,10 @@ int pkg_probe_zeros(const std::string& path, uint64_t size, long mtime) {
             log_printf("pkg: %d нулевых проб из %d: %s", zeros, N + 1, path.c_str());
         }
     }
-    cache[key] = zeros;
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        cache[key] = zeros;
+    }
     return zeros;
 }
 
