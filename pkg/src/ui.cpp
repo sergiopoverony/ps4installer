@@ -1,13 +1,19 @@
-// Шаг 1: каркас интерфейса. Шапка (Logo + три вкладки), переключение вкладок L1/R1,
-// нижняя строка подсказок. Содержимое вкладок пока заглушки: список игр, окна установки
-// и связь со службой добавляются следующими шагами.
+// Шаг 2: шапка (Logo + три вкладки, L1/R1) и вкладка «Доступные игры»: сетка игр по данным
+// службы (/scan), навигация крестовиной и левым стиком, Квадрат - обновить список.
+// Остальные вкладки пока заглушки; окно установки добавляется следующим шагом.
 #include "ui.h"
 #include "scene.h"
 #include "log.h"
+#include "service.h"
+#include "games.h"
+#include "utf8.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
+#include <map>
 #include <string>
+#include <vector>
 
 #include <orbis/Pad.h>
 #include <orbis/UserService.h>
@@ -34,6 +40,16 @@ static const Color C_DIM    = { 150, 155, 165 };
 static const Color C_TAB_ON = { 70, 110, 200 };
 static const Color C_TAB_OFF = { 44, 49, 62 };
 static const Color C_LOGO   = { 60,  66,  84 };
+static const Color C_TILE   = { 34,  38,  48 };
+static const Color C_TILE_SEL = { 52, 60,  82 };
+static const Color C_WARN   = { 235, 180,  80 };
+
+// Сетка игр: 5 колонок, 2 ряда на экране; ниже - прокрутка по рядам.
+static const int COLS = 5, ROWS_VIS = 2;
+static const int TILE_W = 340, IMG_H = 340, TEXT_H = 72;
+static const int TILE_H = IMG_H + TEXT_H;
+static const int GAP_Y = 20;
+static const int GRID_TOP = HEAD_H + 20;
 
 static Scene2D* g_scene = NULL;
 static FT_Face  g_font;
@@ -50,35 +66,6 @@ static const char* TAB_NAMES[TAB_COUNT] = {
 };
 
 // ---------------------------------------------------------------- UTF-8 и текст
-
-static int decode_utf8(const unsigned char*& p)
-{
-    unsigned c = *p++;
-    if (c < 0x80) return (int)c;
-
-    int extra;
-    unsigned cp;
-    if ((c & 0xE0) == 0xC0)      { cp = c & 0x1F; extra = 1; }
-    else if ((c & 0xF0) == 0xE0) { cp = c & 0x0F; extra = 2; }
-    else if ((c & 0xF8) == 0xF0) { cp = c & 0x07; extra = 3; }
-    else return '?';
-
-    while (extra-- > 0) {
-        if ((*p & 0xC0) != 0x80) return '?';
-        cp = (cp << 6) | (*p & 0x3F);
-        p++;
-    }
-    return (int)cp;
-}
-
-// Число символов (не байтов): кириллица занимает 2 байта.
-static int count_cp(const std::string& s)
-{
-    const unsigned char* p = (const unsigned char*)s.c_str();
-    int n = 0;
-    while (*p) { decode_utf8(p); n++; }
-    return n;
-}
 
 static void draw_text(const std::string& s, int x, int baseline, Color fg, Color bg)
 {
@@ -117,7 +104,109 @@ static int text_w(const std::string& s) { return count_cp(s) * g_cellW; }
 
 static void fill(int x, int y, int w, int h, Color c) { g_scene->FillRect(x, y, w, h, c); }
 
+// ---------------------------------------------------------------- игры
+
+enum LoadState { LS_NONE = 0, LS_LOADING, LS_OK, LS_ERROR };
+static LoadState g_load = LS_NONE;
+static std::string g_loadErr;
+static std::vector<Game> g_games;
+static int g_cursor = 0;
+static int g_topRow = 0;
+static std::string g_status;   // строка под сеткой
+
+static void load_games()
+{
+    std::vector<PkgItem> items;
+    std::string err;
+    if (service_scan(items, err)) {
+        build_games(items, g_games);
+        if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
+        g_topRow = 0;
+        g_load = LS_OK;
+        g_loadErr.clear();
+    } else {
+        g_load = LS_ERROR;
+        g_loadErr = err;
+        g_games.clear();
+    }
+    g_status.clear();
+}
+
 // ---------------------------------------------------------------- рисование
+
+static void draw_tile(int x, int y, const Game& g, bool selected)
+{
+    Color bg = selected ? C_TILE_SEL : C_TILE;
+    if (selected) fill(x - 5, y - 5, TILE_W + 10, TILE_H + 10, C_TAB_ON);
+    fill(x, y, TILE_W, TILE_H, bg);
+
+    // Пока без обложки: цветной квадрат по title_id и первая буква названия.
+    unsigned h = 0;
+    for (size_t i = 0; i < g.title_id.size(); i++) h = h * 31 + (unsigned char)g.title_id[i];
+    Color c = { (uint8_t)(50 + (h & 0x3F)), (uint8_t)(60 + ((h >> 6) & 0x3F)), (uint8_t)(80 + ((h >> 12) & 0x5F)) };
+    fill(x, y, TILE_W, IMG_H, c);
+    std::string letter;
+    {
+        const unsigned char* p = (const unsigned char*)g.title.c_str();
+        const unsigned char* st = p;
+        if (*p) { decode_utf8(p); letter = std::string((const char*)st, (size_t)(p - st)); }
+    }
+    draw_text(letter, x + (TILE_W - g_cellW) / 2, y + IMG_H / 2 + FONT_PX / 3, C_TEXT, c);
+
+    // Размер игры в углу картинки
+    std::string sz = fmt_size(g.size);
+    int szw = text_w(sz) + 12;
+    fill(x + TILE_W - szw, y + IMG_H - FONT_PX - 10, szw, FONT_PX + 10, C_BG);
+    draw_text(sz, x + TILE_W - szw + 6, y + IMG_H - 9, C_DIM, C_BG);
+
+    // Пометки: патч / DLC / русификатор
+    std::string tags;
+    if (g.patches) tags += "патч ";
+    if (g.dlcs) tags += "DLC ";
+    if (g.rus) tags += "рус ";
+    if (!tags.empty()) {
+        int w = text_w(tags) + 12;
+        fill(x, y, w, FONT_PX + 10, C_BG);
+        draw_text(tags, x + 6, y + FONT_PX + 1, C_WARN, C_BG);
+    }
+
+    int maxc = (TILE_W - 16) / g_cellW;
+    std::vector<std::string> lines = wrap_lines(g.title, maxc, 2);
+    for (size_t i = 0; i < lines.size(); i++)
+        draw_text(lines[i], x + 8, y + IMG_H + 30 + (int)i * (FONT_PX + 4), C_TEXT, bg);
+}
+
+static void draw_available()
+{
+    if (g_load == LS_LOADING || g_load == LS_NONE) {
+        draw_text("Загрузка списка игр...", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
+        return;
+    }
+    if (g_load == LS_ERROR) {
+        draw_text("Служба установки не отвечает.", MARGIN_X, GRID_TOP + 60, C_WARN, C_BG);
+        draw_text("Запустите ps4installerd (адрес 127.0.0.1, порт 8284) и нажмите Квадрат.", MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
+        draw_text("Причина: " + g_loadErr, MARGIN_X, GRID_TOP + 160, C_DIM, C_BG);
+        return;
+    }
+    if (g_games.empty()) {
+        draw_text("Игр не найдено.", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
+        draw_text("Подключите флешку или диск с играми и нажмите Квадрат.", MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
+        return;
+    }
+    int gapX = (FRAME_WIDTH - 2 * MARGIN_X - COLS * TILE_W) / (COLS - 1);
+    for (int r = 0; r < ROWS_VIS; r++) {
+        for (int c = 0; c < COLS; c++) {
+            int idx = (g_topRow + r) * COLS + c;
+            if (idx >= (int)g_games.size()) break;
+            draw_tile(MARGIN_X + c * (TILE_W + gapX), GRID_TOP + r * (TILE_H + GAP_Y), g_games[(size_t)idx], idx == g_cursor);
+        }
+    }
+    int rows = ((int)g_games.size() + COLS - 1) / COLS;
+    char pg[96];
+    snprintf(pg, sizeof(pg), "Игра %d из %d   ряд %d из %d", g_cursor + 1, (int)g_games.size(), g_cursor / COLS + 1, rows);
+    draw_text(pg, MARGIN_X, FRAME_HEIGHT - 90, C_DIM, C_BG);
+    if (!g_status.empty()) draw_text(g_status, MARGIN_X + 520, FRAME_HEIGHT - 90, C_TEXT, C_BG);
+}
 
 static void draw_all()
 {
@@ -144,15 +233,19 @@ static void draw_all()
     x += 8;
     draw_text("R1", x, HEAD_H / 2 + FONT_PX / 3, C_DIM, C_HEAD);
 
-    // Тело вкладки (заглушка)
-    std::string body = std::string("Здесь будет вкладка «") + TAB_NAMES[g_tab] + "»";
-    draw_text(body, MARGIN_X, HEAD_H + 120, C_TEXT, C_BG);
-    draw_text("Каркас приложения: переключение вкладок кнопками L1 и R1.", MARGIN_X, HEAD_H + 180, C_DIM, C_BG);
+    if (g_tab == TAB_AVAILABLE) {
+        draw_available();
+    } else {
+        std::string body = std::string("Здесь будет вкладка «") + TAB_NAMES[g_tab] + "»";
+        draw_text(body, MARGIN_X, HEAD_H + 120, C_TEXT, C_BG);
+    }
 
     // Нижняя строка
-    draw_text("L1 / R1 - вкладки", MARGIN_X, FRAME_HEIGHT - 50, C_DIM, C_BG);
+    draw_text(g_tab == TAB_AVAILABLE ? "Стрелки / стик - выбор    Крест - установить (скоро)    Квадрат - обновить    L1 / R1 - вкладки"
+                                     : "L1 / R1 - вкладки",
+              MARGIN_X, FRAME_HEIGHT - 40, C_DIM, C_BG);
     std::string ver = std::string("версия ") + APP_VERSION;
-    draw_text(ver, FRAME_WIDTH - MARGIN_X - text_w(ver), FRAME_HEIGHT - 50, C_DIM, C_BG);
+    draw_text(ver, FRAME_WIDTH - MARGIN_X - text_w(ver), FRAME_HEIGHT - 90, C_DIM, C_BG);
 }
 
 // ---------------------------------------------------------------- геймпад
@@ -171,13 +264,19 @@ static bool pad_init()
     return g_pad >= 0;
 }
 
+// Кнопки с учётом левого стика: стик превращается в «нажатия» крестовины.
 static unsigned pad_read()
 {
     if (g_pad < 0) return 0;
     OrbisPadData data;
     memset(&data, 0, sizeof(data));
     scePadReadState(g_pad, &data);
-    return (unsigned)data.buttons;
+    unsigned b = (unsigned)data.buttons;
+    if (data.leftStick.x < 60) b |= ORBIS_PAD_BUTTON_LEFT;
+    if (data.leftStick.x > 196) b |= ORBIS_PAD_BUTTON_RIGHT;
+    if (data.leftStick.y < 60) b |= ORBIS_PAD_BUTTON_UP;
+    if (data.leftStick.y > 196) b |= ORBIS_PAD_BUTTON_DOWN;
+    return b;
 }
 
 // ---------------------------------------------------------------- вход
@@ -199,9 +298,28 @@ bool ui_init()
     return true;
 }
 
+static void cursor_move(int dx, int dy)
+{
+    if (g_games.empty()) return;
+    int n = (int)g_games.size();
+    int c = g_cursor;
+    if (dx < 0 && c % COLS > 0) c--;
+    if (dx > 0 && c % COLS < COLS - 1 && c + 1 < n) c++;
+    if (dy < 0 && c - COLS >= 0) c -= COLS;
+    if (dy > 0) { if (c + COLS < n) c += COLS; else if ((c / COLS) < (n - 1) / COLS) c = n - 1; }
+    if (c != g_cursor) {
+        g_cursor = c;
+        int row = c / COLS;
+        if (row < g_topRow) g_topRow = row;
+        if (row >= g_topRow + ROWS_VIS) g_topRow = row - ROWS_VIS + 1;
+        g_redraw = 2;
+    }
+}
+
 void ui_pump()
 {
     if (!g_ready) return;
+    uint64_t now = sceKernelGetProcessTime();
 
     unsigned b = pad_read();
     static unsigned prev = 0;
@@ -209,11 +327,38 @@ void ui_pump()
     prev = b;
     if (pressed) logf_("pad: pressed 0x%08X", pressed);  // для отладки первых запусков на консоли
 
+    // Автоповтор направлений при удержании: первая задержка 350 мс, затем каждые 110 мс.
+    const unsigned DIRS = ORBIS_PAD_BUTTON_UP | ORBIS_PAD_BUTTON_DOWN | ORBIS_PAD_BUTTON_LEFT | ORBIS_PAD_BUTTON_RIGHT;
+    static uint64_t nextRepeat = 0;
+    unsigned dirs = pressed & DIRS;
+    if (dirs) nextRepeat = now + 350000;
+    else if ((b & DIRS) && now >= nextRepeat) { dirs = b & DIRS; nextRepeat = now + 110000; }
+
     int old = g_tab;
     if (pressed & ORBIS_PAD_BUTTON_L1) g_tab = (g_tab + TAB_COUNT - 1) % TAB_COUNT;
     if (pressed & ORBIS_PAD_BUTTON_R1) g_tab = (g_tab + 1) % TAB_COUNT;
     if (g_tab != old) g_redraw = 2;
 
+    static bool first = true;
+    if (g_tab == TAB_AVAILABLE) {
+        if ((first || (pressed & ORBIS_PAD_BUTTON_SQUARE)) && g_load != LS_LOADING) {
+            first = false;
+            g_load = LS_LOADING;
+            g_redraw = 2;
+        }
+        if (g_load == LS_OK) {
+            int dx = (dirs & ORBIS_PAD_BUTTON_RIGHT ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_LEFT ? 1 : 0);
+            int dy = (dirs & ORBIS_PAD_BUTTON_DOWN ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_UP ? 1 : 0);
+            if (dx || dy) cursor_move(dx, dy);
+            if ((pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
+                g_status = "Выбрано: " + g_games[(size_t)g_cursor].title + " (установка будет на следующем шаге)";
+                logf_("ui: выбрана игра %s (%s)", g_games[(size_t)g_cursor].title.c_str(), g_games[(size_t)g_cursor].path.c_str());
+                g_redraw = 2;
+            }
+        }
+    }
+
+    bool drew = false;
     if (g_redraw > 0) {
         draw_all();
         g_scene->SubmitFlip(g_frameID);
@@ -221,7 +366,14 @@ void ui_pump()
         g_scene->FrameBufferSwap();
         g_frameID++;
         g_redraw--;
+        drew = true;
         static bool hidden = false;
         if (!hidden) { hidden = true; int r = sceSystemServiceHideSplashScreen(); logf_("ui: HideSplashScreen = 0x%08X", (unsigned)r); }
+    }
+
+    // Загрузка списка: сначала на экране показывается «Загрузка...», потом (после показа кадра) идёт запрос.
+    if (drew && g_load == LS_LOADING && g_redraw == 1) {
+        load_games();
+        g_redraw = 2;
     }
 }

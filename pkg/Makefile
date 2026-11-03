@@ -13,7 +13,7 @@ export DOTNET_ROLL_FORWARD := LatestMajor
 TITLE       := Game Store
 TITLE_ID    := OFST00001
 CONTENT_ID  := IV0000-OFST00001_00-OFFLINESTORE0000
-LIBS        := -lc -lkernel -lc++ -lSceVideoOut -lSceSysmodule -lSceFreeType -lScePad -lSceUserService -lSceSystemService
+LIBS        := -lc -lkernel -lc++ -lSceVideoOut -lSceSysmodule -lSceFreeType -lScePad -lSceUserService -lSceSystemService -lSceNet
 EXTRAFLAGS  := -O2
 
 # Версия приложения = версия службы (из ../src/version.h).

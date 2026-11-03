@@ -39,6 +39,7 @@ test:
 	python3 tests/test_service.py
 	python3 tests/test_fetch_catalog.py
 	python3 tests/test_translate_catalog.py
+	python3 tests/test_pkg_games.py
 
 clean:
 	rm -rf build
