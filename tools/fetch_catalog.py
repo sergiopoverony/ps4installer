@@ -153,6 +153,16 @@ def load_catalog_file(path):
     return items
 
 
+def ps4_cid(it):
+    """Content ID для каталога. Игры с PS5-номером (PPSA) несут настоящий PS4-номер в адресе картинки
+    (.../UP1003/CUSA02557_00/...): подставляем его, чтобы игру находили по Title ID, а не только по названию."""
+    uuid = it.get("uuid", "")
+    if "-PPSA" not in uuid:
+        return uuid
+    m = re.search(r"/(CUSA\d{5})_00/", it.get("image", ""))
+    return uuid.replace(re.search(r"PPSA\d{5}", uuid).group(0), m.group(1)) if m else uuid
+
+
 def select_games(items):
     """Оставляет PS4 (CUSA), по одной записи на Title ID (предпочитаем основную игру, а не издание)."""
     best = {}
@@ -180,6 +190,7 @@ def select_games(items):
             "image": it.get("image", ""),
             "href": it.get("href", ""),
             "alts": [a for a in alts.get(tid, []) if a[1] != it["uuid"]],
+            "cid_out": ps4_cid(it),
         })
     cusa_names = {g["name"].lower() for g in games if g["id"].startswith("CUSA")}
     games = [g for g in games if g["id"].startswith("CUSA") or g["name"].lower() not in cusa_names]
@@ -685,7 +696,7 @@ def pack(games, cache_dir, out_dir, log=print, keep_online=False, keep_ids=()):
             if not keep_online and g["id"] not in keep_ids and needs_online(meta.get("notice")):
                 removed.append("%s  %s" % (g["id"], g["name"]))
                 continue
-            entry = {"id": g["id"], "cid": g["cid"], "n": g["name"]}
+            entry = {"id": g["id"], "cid": g.get("cid_out", g["cid"]), "n": g["name"]}
             if meta.get("name_ru"):
                 entry["r"] = meta["name_ru"]
             entry["c"] = put((d / "cover.jpg").read_bytes())
