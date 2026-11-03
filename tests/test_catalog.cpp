@@ -23,6 +23,8 @@ int main(int argc, char** argv)
     CHECK(catalog_by_name("TEST game\xE2\x84\xA2!") == e);
     CHECK(catalog_by_name("\xD0\xA2\xD0\x95\xD0\xA1\xD0\xA2") == e);   // «ТЕСТ»
     CHECK(catalog_by_name("Nothing here") == nullptr);
+    CHECK(catalog_by_name("Test") == nullptr);                 // слишком коротко для неточного поиска
+    CHECK(catalog_by_name("Test Game: Deluxe Edition") == nullptr);   // наше название длиннее каталожного - не берём
     const char* how = "";
     CHECK(catalog_find("CUSA00000", "test game", &how) == e);
     CHECK(std::string(how) == "name");

@@ -114,7 +114,18 @@ const CatEntry* catalog_by_name(const std::string& name)
     if (k.size() < 3) return nullptr;
     for (size_t i = 0; i < g_entries.size(); i++)
         if (name_key(g_entries[i].name_en) == k || (!g_entries[i].name_ru.empty() && name_key(g_entries[i].name_ru) == k)) return &g_entries[i];
-    return nullptr;
+    // Не нашли точно: берём игру, название которой начинается с нашего (в каталоге часто дописано "- Game of the
+    // Year Edition"), если наше не короче половины. Из нескольких подходящих - с самым коротким названием.
+    const CatEntry* best = nullptr;
+    size_t bestLen = 0;
+    if (k.size() >= 8) {
+        for (size_t i = 0; i < g_entries.size(); i++) {
+            std::string e = name_key(g_entries[i].name_en);
+            if (e.size() > k.size() && e.compare(0, k.size(), k) == 0 && k.size() * 2 >= e.size() &&
+                (!best || e.size() < bestLen)) { best = &g_entries[i]; bestLen = e.size(); }
+        }
+    }
+    return best;
 }
 
 const CatEntry* catalog_find(const std::string& title_id, const std::string& name, const char** how)
