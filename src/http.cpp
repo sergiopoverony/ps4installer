@@ -141,6 +141,44 @@ Response route(const Request& rq) {
         r.body += "]}";
         return r;
     }
+    if (rq.path == "/installed_games") {
+        std::vector<platform::InstalledGame> gs = platform::installed_games();
+        r.body = "{\"ok\":true,\"games\":[";
+        for (size_t i = 0; i < gs.size(); i++)
+            r.body += std::string(i ? "," : "") + "{\"id\":\"" + json_escape(gs[i].title_id) + "\",\"title\":\"" + json_escape(gs[i].title) + "\"}";
+        r.body += "]}";
+        return r;
+    }
+    if (rq.path == "/appicon") {
+        size_t k = rq.query.find("id=");
+        std::string id = k == std::string::npos ? "" : url_decode(rq.query.substr(k + 3));
+        bool known = false;
+        for (const std::string& t : platform::installed_title_ids()) known = known || t == id;
+        std::string p = known ? platform::app_icon_path(id) : "";
+        FILE* f = p.empty() ? nullptr : fopen(p.c_str(), "rb");
+        if (!f) return json_error(404, "no_icon", id);
+        std::string data;
+        char buf[8192];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0 && data.size() < (8u << 20)) data.append(buf, n);
+        fclose(f);
+        r.content_type = "image/png";
+        r.body = data;
+        return r;
+    }
+    if (rq.path == "/launch") {
+        if (rq.method != "POST") return json_error(405, "method", "нужен POST");
+        std::vector<std::string> ids;
+        if (!json_get_string_array(rq.body, "title_ids", &ids) || ids.size() != 1)
+            return json_error(400, "bad_request", "ожидается {\"title_ids\":[\"CUSA00000\"]}");
+        bool known = false;
+        for (const std::string& t : platform::installed_title_ids()) known = known || t == ids[0];
+        if (!known) return json_error(404, "not_installed", ids[0]);
+        std::string err;
+        if (!platform::launch_app(ids[0], &err)) return json_error(500, "launch_failed", err);
+        r.body = "{\"ok\":true}";
+        return r;
+    }
     if (rq.path == "/icon") {
         size_t k = rq.query.find("path=");
         std::string p = k == std::string::npos ? "" : url_decode(rq.query.substr(k + 5));

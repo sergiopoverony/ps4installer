@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "log.h"
+#include "pkg.h"
 #include "version.h"
 
 #ifdef HOST_TEST
@@ -48,10 +49,58 @@ std::vector<std::string> installed_title_ids() {
     while (i < s.size()) {
         size_t k = s.find(',', i);
         if (k == std::string::npos) k = s.size();
-        if (k > i) out.push_back(s.substr(i, k - i));
+        if (k > i) {
+            std::string one = s.substr(i, k - i);
+            size_t c = one.find(':');
+            out.push_back(c == std::string::npos ? one : one.substr(0, c));
+        }
         i = k + 1;
     }
     return out;
+}
+std::vector<InstalledGame> installed_games() {
+    std::vector<InstalledGame> out;
+    const char* env = getenv("FAKE_INSTALLED");
+    std::string s = env ? env : "";
+    size_t i = 0;
+    while (i < s.size()) {
+        size_t k = s.find(',', i);
+        if (k == std::string::npos) k = s.size();
+        if (k > i) {
+            std::string one = s.substr(i, k - i);
+            size_t c = one.find(':');
+            InstalledGame g;
+            g.title_id = c == std::string::npos ? one : one.substr(0, c);
+            if (c != std::string::npos) g.title = one.substr(c + 1);
+            out.push_back(g);
+        }
+        i = k + 1;
+    }
+    return out;
+}
+std::string app_icon_path(const std::string& title_id) {
+    const char* d = getenv("FAKE_APPMETA");
+    if (!d) return "";
+    std::string p = std::string(d) + "/" + title_id + "/icon0.png";
+    FILE* f = fopen(p.c_str(), "rb");
+    if (!f) return "";
+    fclose(f);
+    return p;
+}
+bool launch_app(const std::string& title_id, std::string* err) {
+    const char* lg = getenv("FAKE_LAUNCH_LOG");
+    if (title_id.find("FAIL") != std::string::npos) {
+        *err = "fake launch failure";
+        return false;
+    }
+    if (lg) {
+        FILE* f = fopen(lg, "a");
+        if (f) {
+            fprintf(f, "%s\n", title_id.c_str());
+            fclose(f);
+        }
+    }
+    return true;
 }
 void power_tick() {}
 
@@ -246,6 +295,75 @@ std::vector<std::string> installed_title_ids() {
     }
     closedir(d);
     return out;
+}
+
+// Файлы установленной игры: места, где они обычно лежат на джейлбрейкнутой консоли (не проверено на 13.02).
+static const char* APPMETA_DIRS[] = {"/user/appmeta/", "/system_data/priv/appmeta/"};
+
+std::vector<InstalledGame> installed_games() {
+    std::vector<InstalledGame> out;
+    std::vector<std::string> ids = installed_title_ids();
+    for (size_t i = 0; i < ids.size(); i++) {
+        InstalledGame g;
+        g.title_id = ids[i];
+        std::string t;
+        for (const char* d : APPMETA_DIRS) {
+            if (pkg_sfo_title_from_file(std::string(d) + ids[i] + "/param.sfo", &t)) break;
+        }
+        if (t.empty()) pkg_sfo_title_from_file("/user/app/" + ids[i] + "/sce_sys/param.sfo", &t);
+        g.title = t;
+        out.push_back(g);
+    }
+    return out;
+}
+
+std::string app_icon_path(const std::string& title_id) {
+    for (const char* d : APPMETA_DIRS) {
+        std::string p = std::string(d) + title_id + "/icon0.png";
+        if (access(p.c_str(), R_OK) == 0) return p;
+    }
+    std::string p = "/user/app/" + title_id + "/sce_sys/icon0.png";
+    return access(p.c_str(), R_OK) == 0 ? p : "";
+}
+
+struct LaunchAppParam {
+    uint32_t size;
+    int32_t userId;
+    int32_t appAttr;
+    int32_t enableCrashReport;
+    uint64_t checkFlag;
+};
+typedef int (*fn_launch_t)(const char*, char* const*, LaunchAppParam*);
+
+bool launch_app(const std::string& title_id, std::string* err) {
+    static fn_launch_t fn = nullptr;
+    if (!fn) {
+        static const char* dirs[] = {"/system/common/lib/", "/system/priv/lib/"};
+        for (const char* d : dirs) {
+            void* h = dlopen((std::string(d) + "libSceSystemService.sprx").c_str(), 0);
+            if (h) {
+                fn = (fn_launch_t)dlsym(h, "sceSystemServiceLaunchApp");
+                if (fn) break;
+            }
+        }
+    }
+    if (!fn) {
+        *err = "sceSystemServiceLaunchApp не найдена";
+        return false;
+    }
+    LaunchAppParam p;
+    memset(&p, 0, sizeof(p));
+    p.size = sizeof(p);
+    p.userId = 0xFF;  // системный пользователь; значение предположительное
+    int r = fn(title_id.c_str(), nullptr, &p);
+    log_printf("launch %s -> 0x%08X", title_id.c_str(), (unsigned)r);
+    if (r != 0) {
+        char b[64];
+        snprintf(b, sizeof(b), "ошибка запуска 0x%08X", (unsigned)r);
+        *err = b;
+        return false;
+    }
+    return true;
 }
 
 void power_tick() { sceSystemServicePowerTick(); }

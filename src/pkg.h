@@ -40,6 +40,9 @@ struct PkgInfo {
     bool dlc_name = false;   // слово DLC в имени
 };
 
+// TITLE из обычного файла param.sfo (у установленной игры). false, если файла нет или он не разобран.
+bool pkg_sfo_title_from_file(const std::string& path, std::string* title);
+
 // Ищет признаки в имени файла и имени его папки (по целым словам, регистр не важен).
 void pkg_apply_name_tags(PkgInfo* p);
 

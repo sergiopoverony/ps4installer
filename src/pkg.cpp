@@ -125,6 +125,24 @@ static void parse_sfo(const std::vector<uint8_t>& d, PkgInfo* out) {
     }
 }
 
+bool pkg_sfo_title_from_file(const std::string& path, std::string* title) {
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) {
+        return false;
+    }
+    std::vector<uint8_t> d(1 << 20);
+    size_t n = fread(d.data(), 1, d.size(), f);
+    fclose(f);
+    d.resize(n);
+    PkgInfo p;
+    parse_sfo(d, &p);
+    if (p.title.empty()) {
+        return false;
+    }
+    *title = p.title;
+    return true;
+}
+
 // Читает param.sfo из таблицы файлов PKG (запись с id 0x1000). Не проверено на настоящих PKG.
 static void read_sfo(FILE* f, uint64_t file_size, const uint8_t* hdr, PkgInfo* out) {
     uint32_t count = be32(hdr + 0x10), table = be32(hdr + 0x18);

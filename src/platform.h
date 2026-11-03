@@ -13,6 +13,16 @@ void notify(const std::string& msg);  // всплывающее уведомле
 void notify_icon(const std::string& msg, const std::string& icon_uri);
 // Title ID установленных игр (папки в /user/app). На ПК: переменная FAKE_INSTALLED="A,B".
 std::vector<std::string> installed_title_ids();
+// Установленные игры с названиями (из param.sfo установленной игры; пусто, если прочитать не удалось).
+// На ПК: FAKE_INSTALLED="ID:Название,ID2".
+struct InstalledGame {
+    std::string title_id, title;
+};
+std::vector<InstalledGame> installed_games();
+// Путь к icon0.png установленной игры или пустая строка. На ПК: папка FAKE_APPMETA/<ID>/icon0.png.
+std::string app_icon_path(const std::string& title_id);
+// Запуск установленной игры. Не проверено на консоли. На ПК: пишет Title ID в файл FAKE_LAUNCH_LOG.
+bool launch_app(const std::string& title_id, std::string* err);
 void power_tick();                    // не давать консоли уйти в сон на время установки
 bool free_bytes(const char* path, uint64_t* out);
 
