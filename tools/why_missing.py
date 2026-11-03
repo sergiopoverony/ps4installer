@@ -19,7 +19,7 @@ for word in sys.argv[1:]:
         blk = mm.group(0)
         if w not in mm.group(1).lower():
             continue
-        u = re.search(r'CUSA\d{5}', blk)
+        u = re.search(r'(?:CUSA|PPSA)\d{5}', blk)
         if not u or u.group(0) in seen:
             continue
         tid = u.group(0); seen.add(tid)
