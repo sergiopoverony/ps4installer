@@ -317,13 +317,27 @@ class ServiceTests(unittest.TestCase):
         c = make_pkg(DATA_PKG / "c.pkg", "UP0001-CUSA00063_00-CCCCCCCCCCCCCCCC", 0x3000)
         self.srv = Server(extra=[])
         self.assertEqual(self.srv.post("/install", {"paths": [a, b, c]})[0], 200)
+        # Повторный запрос тех же файлов во время установки их не дублирует.
         code, j = self.srv.post("/install", {"paths": [a]})
-        self.assertEqual((code, j["error"]), (409, "busy"))
+        self.assertEqual(code, 200)
+        self.assertEqual(j["order"], [])
+        self.assertEqual(len(self.srv.get("/status")[1]["jobs"]), 3)
         self.assertEqual(self.srv.post("/cancel")[0], 200)
         st = self.srv.wait_idle()
         statuses = [x["status"] for x in st["jobs"]]
         self.assertEqual(statuses[0], "done")
         self.assertIn("cancelled", statuses[1:])
+
+    def test_queue_appends_second_batch(self):
+        a = make_pkg(DATA_PKG / "qa.pkg", "UP0001-CUSA00071_00-QAQAQAQAQAQAQAQA", 0x9000)
+        b = make_pkg(DATA_PKG / "qb.pkg", "UP0001-CUSA00072_00-QBQBQBQBQBQBQBQB", 0x5000)
+        self.srv = Server(extra=[])
+        self.assertEqual(self.srv.post("/install", {"paths": [a]})[0], 200)
+        code, j = self.srv.post("/install", {"paths": [b]})
+        self.assertEqual(code, 200)
+        self.assertEqual(j["order"], [b])
+        st = self.srv.wait_idle()
+        self.assertEqual([x["status"] for x in st["jobs"]], ["done", "done"])
 
     def test_second_instance_replaces_first(self):
         port = free_port()

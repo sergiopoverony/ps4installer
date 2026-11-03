@@ -23,6 +23,7 @@ struct Job {
     uint64_t length = 0;
     uint64_t transferred = 0;
     std::string message;
+    int group = 0;  // номер пачки (один запрос /install)
 };
 
 std::mutex g_mu;
@@ -30,7 +31,8 @@ std::condition_variable g_cv;
 std::vector<Job> g_jobs;
 bool g_stop = false;
 bool g_worker_started = false;
-bool g_notified = true;  // уведомление «установлено» по этой пачке уже показано
+int g_next_group = 1;
+std::vector<int> g_notified_groups;  // пачки, по которым уведомление уже показано
 std::thread g_worker;
 int g_stall_sec = 180;
 int g_poll_ms = 1000;
@@ -159,29 +161,51 @@ void run_job(int idx) {
 // Когда вся пачка закончилась без ошибок - показываем на экране консоли «ИМЯ ИГРЫ / УСТАНОВЛЕНО».
 // Иконка берётся из каталога метаданных игры; работает ли это на консоли - не проверено.
 void notify_if_finished() {
-    std::string title, tid;
-    {
-        std::lock_guard<std::mutex> lk(g_mu);
-        if (g_notified || any_active_locked()) {
+    for (;;) {
+        std::string title, tid;
+        int grp = 0;
+        {
+            std::lock_guard<std::mutex> lk(g_mu);
+            // Ищем пачку, в которой всё закончилось, и по ней ещё не уведомляли.
+            for (const Job& j : g_jobs) {
+                bool done_before = false;
+                for (int g : g_notified_groups) {
+                    done_before = done_before || g == j.group;
+                }
+                if (done_before) {
+                    continue;
+                }
+                bool all_done = true, failed = false;
+                const Job* pick = nullptr;
+                for (const Job& k : g_jobs) {
+                    if (k.group != j.group) {
+                        continue;
+                    }
+                    all_done = all_done && !is_active(k.status);
+                    failed = failed || k.status == "failed";
+                    if (!pick || (k.pkg.kind == "game" && pick->pkg.kind != "game")) {
+                        pick = &k;
+                    }
+                }
+                if (!all_done) {
+                    continue;
+                }
+                grp = j.group;
+                g_notified_groups.push_back(grp);
+                if (!failed && pick) {
+                    title = pick->pkg.title.empty() ? pick->pkg.title_id : pick->pkg.title;
+                    tid = pick->pkg.title_id;
+                }
+                break;
+            }
+        }
+        if (grp == 0) {
             return;
         }
-        g_notified = true;
-        const Job* pick = nullptr;
-        for (const Job& j : g_jobs) {
-            if (j.status == "failed") {
-                return;
-            }
-            if (!pick || (j.pkg.kind == "game" && pick->pkg.kind != "game")) {
-                pick = &j;
-            }
+        if (!title.empty()) {
+            platform::notify_icon(title + "\nУстановлено", "/user/appmeta/" + tid + "/icon0.png");
         }
-        if (!pick) {
-            return;
-        }
-        title = pick->pkg.title.empty() ? pick->pkg.title_id : pick->pkg.title;
-        tid = pick->pkg.title_id;
     }
-    platform::notify_icon(title + "\nУстановлено", "/user/appmeta/" + tid + "/icon0.png");
 }
 
 void worker_main() {
@@ -270,6 +294,16 @@ EnqueueResult enqueue(const std::vector<std::string>& paths) {
     for (const PkgInfo& e : list) {
         need += e.file_size;
     }
+    uint64_t pending = 0;  // ещё не скачанное по уже идущей очереди
+    {
+        std::lock_guard<std::mutex> lk(g_mu);
+        for (const Job& j : g_jobs) {
+            if (is_active(j.status)) {
+                pending += j.pkg.file_size;
+            }
+        }
+    }
+    need += pending;
     uint64_t free_b = 0;
     // Грубая проверка: размер пакетов против свободного места. Реальный размер установленной
     // игры может отличаться (не проверено на консоли), поэтому это лишь защита от явной нехватки.
@@ -300,14 +334,27 @@ EnqueueResult enqueue(const std::vector<std::string>& paths) {
 
     {
         std::lock_guard<std::mutex> lk(g_mu);
-        if (any_active_locked()) {
-            return fail(409, "busy", "установка уже идёт");
+        if (!any_active_locked()) {
+            g_jobs.clear();
+            g_notified_groups.clear();
         }
-        g_jobs.clear();
-        g_notified = false;
+        // Уже стоящее в очереди или идущее второй раз не добавляем.
+        std::vector<PkgInfo> fresh;
+        for (const PkgInfo& e : list) {
+            bool dup = false;
+            for (const Job& j : g_jobs) {
+                dup = dup || (is_active(j.status) && j.pkg.path == e.path);
+            }
+            if (!dup) {
+                fresh.push_back(e);
+            }
+        }
+        list = fresh;
+        int grp = g_next_group++;
         for (const PkgInfo& e : list) {
             Job j;
             j.pkg = e;
+            j.group = grp;
             g_jobs.push_back(j);
         }
         if (!g_worker_started) {

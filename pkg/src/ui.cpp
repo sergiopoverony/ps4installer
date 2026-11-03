@@ -147,6 +147,32 @@ static bool g_instActive = false;          // установка идёт (оп�
 static bool g_instFinished = false;        // закончилась (успешно или с ошибкой), окно ещё не закрыто
 static InstallStatus g_inst;
 static std::string g_instTitle;
+static std::vector<PkgItem> g_queuedFiles; // все файлы, отправленные на установку (для подписей)
+static int g_queuedGames = 0;
+
+static bool job_active(const InstallJob& j)
+{
+    return j.status == "queued" || j.status == "registering" || j.status == "installing";
+}
+
+// Файлы игры стоят в очереди или ставятся прямо сейчас.
+static bool game_queued(const Game& g)
+{
+    for (size_t j = 0; j < g_inst.jobs.size(); j++) {
+        if (!job_active(g_inst.jobs[j])) continue;
+        for (size_t f = 0; f < g.files.size(); f++)
+            if (g.files[f].path == g_inst.jobs[j].path) return true;
+    }
+    return false;
+}
+
+static uint64_t pending_bytes()
+{
+    uint64_t n = 0;
+    for (size_t j = 0; j < g_inst.jobs.size(); j++)
+        if (job_active(g_inst.jobs[j])) n += g_inst.jobs[j].size;
+    return n;
+}
 static uint64_t g_lastPoll = 0;
 
 static void mark_installed()
@@ -213,6 +239,14 @@ static void draw_tile(int x, int y, const Game& g, bool selected)
         int mx = x + (TILE_W - w) / 2, my = y + IMG_H / 2 - (FONT_PX + 16) / 2;
         fill(mx, my, w, FONT_PX + 16, C_GREEN);
         draw_text(m, mx + 8, my + FONT_PX + 4, C_BG, C_GREEN);
+    }
+
+    if (!g.installed && game_queued(g)) {
+        std::string m = "В ОЧЕРЕДИ";
+        int w = text_w(m) + 16;
+        int mx = x + (TILE_W - w) / 2, my = y + IMG_H / 2 - (FONT_PX + 16) / 2;
+        fill(mx, my, w, FONT_PX + 16, C_WARN);
+        draw_text(m, mx + 8, my + FONT_PX + 4, C_BG, C_WARN);
     }
 
     // Пометки: патч / DLC / русификатор
@@ -297,8 +331,8 @@ static void draw_bar(int x, int y, int w, int h, int pct, Color c)
 
 static std::string job_label(const InstallJob& j)
 {
-    for (size_t i = 0; i < g_selFiles.size(); i++)
-        if (g_selFiles[i].path == j.path) return file_label(g_selFiles[i]);
+    for (size_t i = 0; i < g_queuedFiles.size(); i++)
+        if (g_queuedFiles[i].path == j.path) return file_label(g_queuedFiles[i]);
     return j.kind;
 }
 
@@ -459,7 +493,7 @@ static void draw_all()
     // Нижняя строка
     const char* hint = "L1 / R1 - вкладки";
     if (g_tab == TAB_AVAILABLE && g_mode == MODE_GRID)
-        hint = g_instActive ? "Стрелки / стик - выбор    Крест - ход установки    Квадрат - обновить    L1 / R1 - вкладки"
+        hint = g_instActive ? "Стрелки / стик - выбор    Крест - в очередь    Треугольник - ход установки    Квадрат - обновить    L1 / R1 - вкладки"
                             : "Стрелки / стик - выбор    Крест - установить    Квадрат - обновить    L1 / R1 - вкладки";
     else if (g_mode != MODE_GRID) hint = "";
     draw_text(hint, MARGIN_X, FRAME_HEIGHT - 40, C_DIM, C_BG);
@@ -592,15 +626,19 @@ void ui_pump()
             int dx = (dirs & ORBIS_PAD_BUTTON_RIGHT ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_LEFT ? 1 : 0);
             int dy = (dirs & ORBIS_PAD_BUTTON_DOWN ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_UP ? 1 : 0);
             if (dx || dy) cursor_move(dx, dy);
+            if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_TRIANGLE) && (g_instActive || g_instFinished)) {
+                g_mode = MODE_PROGRESS;
+                g_redraw = 2;
+            }
             if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
-                if (g_instActive || g_instFinished) {            // уже есть установка: показываем её ход
-                    g_mode = MODE_PROGRESS;
-                } else if (g_games[(size_t)g_cursor].installed) {
+                if (g_games[(size_t)g_cursor].installed) {
                     // уже установлена: второй раз не ставим
+                } else if (g_instActive && game_queued(g_games[(size_t)g_cursor])) {
+                    g_mode = MODE_PROGRESS;                       // она уже в очереди: показываем ход
                 } else {
                     g_sel = g_games[(size_t)g_cursor];
                     g_selFiles = install_files(g_sel, service_fw_major());
-                    g_selNeed = install_bytes(g_sel, service_fw_major());
+                    g_selNeed = install_bytes(g_sel, service_fw_major()) + (g_instActive ? pending_bytes() : 0);
                     g_freeOk = service_free(g_freeBytes);
                     g_confirmErr.clear();
                     g_mode = MODE_CONFIRM;
@@ -622,10 +660,12 @@ void ui_pump()
             std::vector<std::string> skipped;
             if (service_install(paths, err, &skipped)) {
                 for (size_t i = 0; i < skipped.size(); i++) logf_("ui: служба пропустила: %s", skipped[i].c_str());
-                g_instTitle = g_sel.title;
+                if (!g_instActive) { g_queuedFiles.clear(); g_queuedGames = 0; g_inst = InstallStatus(); }
+                for (size_t i = 0; i < g_selFiles.size(); i++) g_queuedFiles.push_back(g_selFiles[i]);
+                g_queuedGames++;
+                g_instTitle = g_queuedGames > 1 ? "Очередь установки (игр: " + std::to_string(g_queuedGames) + ")" : g_sel.title;
                 g_instActive = true;
                 g_instFinished = false;
-                g_inst = InstallStatus();
                 g_lastPoll = 0;
                 g_mode = MODE_PROGRESS;
                 logf_("ui: установка запущена: %s (%d файлов)", g_sel.title.c_str(), (int)paths.size());
