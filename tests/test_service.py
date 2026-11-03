@@ -234,6 +234,30 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(j["skipped"], [])
         self.srv.wait_idle()
 
+    def test_survives_connection_flood(self):
+        # много пустых соединений и быстрые запросы: служба не падает и потом отвечает
+        self.srv = Server()
+        idle = []
+        for _ in range(40):
+            c = socket.socket()
+            c.connect(("127.0.0.1", self.srv.port))
+            idle.append(c)
+        for _ in range(60):
+            try:
+                self.srv.get("/status")
+            except Exception:
+                pass
+        for c in idle:
+            c.close()
+        time.sleep(0.5)
+        for _ in range(50):
+            code, j = self.srv.get("/health")
+            if code == 200:
+                break
+            time.sleep(0.2)
+        self.assertEqual(code, 200)
+        self.assertIsNone(self.srv.proc.poll())
+
     def test_bad_requests(self):
         ok = make_pkg(DATA_PKG / "ok.pkg", "UP0001-CUSA00021_00-OKOKOKOKOKOKOKOK", 0x2000)
         (DATA_PKG / "garbage.pkg").write_bytes(b"x" * 5000)

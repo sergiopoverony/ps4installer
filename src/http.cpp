@@ -199,9 +199,12 @@ void send_all(int fd, const std::string& s) {
     }
 }
 
+std::atomic<int> g_active_clients{0};
+const int MAX_CLIENTS = 6;  // больше одновременных запросов службе не нужно
+
 void handle_client(int fd) {
     struct timeval tv;
-    tv.tv_sec = 10;
+    tv.tv_sec = 4;  // пустое соединение (браузеры открывают лишние) не должно висеть долго
     tv.tv_usec = 0;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     Request rq;
@@ -213,6 +216,7 @@ void handle_client(int fd) {
         send_all(fd, out);
     }
     close(fd);
+    g_active_clients--;
 }
 
 }  // namespace
@@ -281,7 +285,21 @@ int http_serve(int port) {
         if (c < 0) {
             continue;
         }
-        std::thread(handle_client, c).detach();
+        if (g_active_clients >= MAX_CLIENTS) {  // перегрузка (например, быстрые обновления страницы)
+            static const char busy[] =
+                "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+            send(c, busy, sizeof(busy) - 1, 0);
+            close(c);
+            continue;
+        }
+        g_active_clients++;
+        try {
+            std::thread(handle_client, c).detach();
+        } catch (const std::exception& e) {  // не удалось создать поток: не падаем
+            g_active_clients--;
+            log_printf("http: не удалось создать поток: %s", e.what());
+            close(c);
+        }
     }
     close(fd);
     log_printf("служба завершается");
