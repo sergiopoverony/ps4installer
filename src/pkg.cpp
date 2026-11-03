@@ -152,6 +152,43 @@ static void read_sfo(FILE* f, uint64_t file_size, const uint8_t* hdr, PkgInfo* o
     }
 }
 
+bool pkg_read_icon(const std::string& path, std::vector<uint8_t>* out) {
+    out->clear();
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) {
+        return false;
+    }
+    uint8_t hdr[0x20];
+    struct stat st;
+    bool ok = false;
+    if (fread(hdr, 1, sizeof(hdr), f) == sizeof(hdr) && fstat(fileno(f), &st) == 0 && be32(hdr) == 0x7F434E54) {
+        uint32_t count = be32(hdr + 0x10), table = be32(hdr + 0x18);
+        uint64_t fsz = (uint64_t)st.st_size;
+        if (count > 0 && count <= 4096 && table != 0 && table < fsz) {
+            for (uint32_t i = 0; i < count && !ok; i++) {
+                uint8_t e[32];
+                if (fseeko(f, (off_t)table + (off_t)i * 32, SEEK_SET) != 0 || fread(e, 1, 32, f) != 32) {
+                    break;
+                }
+                if (be32(e) != 0x1200) {
+                    continue;
+                }
+                uint32_t off = be32(e + 16), size = be32(e + 20);
+                if (size == 0 || size > (4u << 20) || (uint64_t)off + size > fsz) {
+                    break;
+                }
+                out->resize(size);
+                ok = fseeko(f, (off_t)off, SEEK_SET) == 0 && fread(out->data(), 1, size, f) == size;
+            }
+        }
+    }
+    fclose(f);
+    if (!ok) {
+        out->clear();
+    }
+    return ok;
+}
+
 // Слова из строки: буквы, цифры и байты UTF-8 (кириллица), остальное - разделители.
 static std::vector<std::string> words_of(const std::string& s) {
     std::vector<std::string> w;

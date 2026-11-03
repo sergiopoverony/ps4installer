@@ -348,6 +348,26 @@ class ServiceTests(unittest.TestCase):
         item = [x for x in self.srv.get("/scan")[1]["packages"] if x["path"] == p][0]
         self.assertFalse(item["incomplete"])
 
+    def test_icon_from_pkg(self):
+        p = make_pkg(DATA_PKG / "icon.pkg", "UP0001-CUSA00093_00-ICONICONICONICON", 0x6000)
+        data = bytearray(open(p, "rb").read())
+        png = b"\x89PNG\r\n\x1a\n" + bytes(range(64))
+        data[0x10:0x14] = (1).to_bytes(4, "big")          # записей в таблице
+        data[0x18:0x1C] = (0x2000).to_bytes(4, "big")     # смещение таблицы
+        data[0x2000:0x2004] = (0x1200).to_bytes(4, "big")  # ICON0_PNG
+        data[0x2010:0x2014] = (0x3000).to_bytes(4, "big")
+        data[0x2014:0x2018] = len(png).to_bytes(4, "big")
+        data[0x3000:0x3000 + len(png)] = png
+        open(p, "wb").write(bytes(data))
+        self.srv = Server(extra=[])
+        import urllib.parse
+        with urllib.request.urlopen("http://127.0.0.1:%d/icon?path=%s" % (self.srv.port, urllib.parse.quote(p))) as r:
+            self.assertEqual(r.headers["Content-Type"], "image/png")
+            self.assertEqual(r.read(), png)
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen("http://127.0.0.1:%d/icon?path=%s" % (self.srv.port, urllib.parse.quote("/etc/passwd")))
+        self.assertEqual(cm.exception.code, 404)
+
     def test_queue_appends_second_batch(self):
         a = make_pkg(DATA_PKG / "qa.pkg", "UP0001-CUSA00071_00-QAQAQAQAQAQAQAQA", 0x9000)
         b = make_pkg(DATA_PKG / "qb.pkg", "UP0001-CUSA00072_00-QBQBQBQBQBQBQBQB", 0x5000)

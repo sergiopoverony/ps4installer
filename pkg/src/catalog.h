@@ -1,6 +1,6 @@
 #pragma once
 // Офлайн-каталог игр: data/catalog.json (индекс) + data/catalog.pak (JPEG и тексты по смещениям).
-// Оба файла вшиты в PKG: /app0/assets/data/. Здесь нет ничего консольного - можно проверять на ПК.
+// Оба файла вшиты в PKG: /app0/assets/misc/ (или для проверок /data/ps4installer_app/catalog/). Здесь нет ничего консольного - можно проверять на ПК.
 #include <stdint.h>
 #include <string>
 #include <vector>
@@ -30,3 +30,5 @@ struct CatImage {
     bool ok() const { return w > 0 && h > 0 && (int)px.size() == w * h; }
 };
 bool catalog_image(const CatRef& ref, int w, int h, CatImage& out);
+// То же для картинки (JPEG или PNG), уже лежащей в памяти (например, иконка из PKG).
+bool catalog_image_from_blob(const std::string& blob, int w, int h, CatImage& out);

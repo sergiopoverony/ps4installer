@@ -69,6 +69,20 @@ bool service_free(uint64_t& bytes)
     return true;
 }
 
+bool service_icon(const std::string& pkgPath, std::string& png)
+{
+    std::string q = "/icon?path=";
+    for (size_t i = 0; i < pkgPath.size(); i++) {
+        unsigned char c = (unsigned char)pkgPath[i];
+        if (isalnum(c) || c == '/' || c == '.' || c == '_' || c == '-') q += (char)c;
+        else { char b[8]; snprintf(b, sizeof(b), "%%%02X", c); q += b; }
+    }
+    HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, q, 4000);
+    if (!r.connected || r.status != 200 || r.body.size() < 16) return false;
+    png = r.body;
+    return true;
+}
+
 bool service_installed(std::vector<std::string>& ids)
 {
     ids.clear();

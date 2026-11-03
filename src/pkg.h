@@ -60,6 +60,8 @@ std::vector<PkgInfo> plan_install(const std::vector<PkgInfo>& in, int fw_major, 
 // Читает пробы по 4 КиБ из ~48 мест файла и считает, сколько из них целиком нулевые.
 // Результат запоминается по (путь, размер, время изменения). Маленькие файлы (<8 МиБ) не проверяются.
 int pkg_probe_zeros(const std::string& path, uint64_t size, long mtime);
+// Иконка игры (icon0.png) из таблицы файлов PKG: запись с id 0x1200. false, если её нет или файл не читается.
+bool pkg_read_icon(const std::string& path, std::vector<uint8_t>* out);
 bool pkg_read_header(const std::string& path, PkgInfo* out, std::string* err);
 
 // Разбор уже прочитанных первых байт файла (для тестов и pkg_read_header).

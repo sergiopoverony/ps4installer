@@ -134,6 +134,8 @@ static std::string g_loadErr;
 static std::vector<Game> g_games;
 static int g_cursor = 0;
 static int g_topRow = 0;
+static std::vector<CatImage> g_tileImg;   // картинки плиток (см. tile_images_step)
+static std::vector<char> g_tileTried;
 static std::string g_status;   // строка под сеткой
 
 // Окна: подтверждение установки и ход установки.
@@ -176,6 +178,7 @@ static uint64_t pending_bytes()
     return n;
 }
 static uint64_t g_lastPoll = 0;
+static bool g_skipConfirmInput = false;   // то же нажатие Креста, что открыло окно, не считается «Установить»
 
 static void mark_installed()
 {
@@ -194,6 +197,7 @@ static void load_games()
     std::string err;
     if (service_scan(items, err)) {
         build_games(items, g_games);
+        g_tileImg.clear(); g_tileTried.clear();
         for (size_t i = 0; i < g_games.size(); i++)
             for (size_t k = 0; k < g_games[i].files.size(); k++)
                 if (g_games[i].files[k].incomplete) g_games[i].incomplete = true;
@@ -212,7 +216,38 @@ static void load_games()
 
 // ---------------------------------------------------------------- рисование
 
-static void draw_tile(int x, int y, const Game& g, bool selected)
+static void blit(const CatImage& im, int x, int y);
+
+// Картинки плиток (обложка из каталога или иконка из PKG): грузятся лениво, держим только видимые ряды.
+
+static bool load_game_image(const Game& g, int w, int h, CatImage& out)
+{
+    const CatEntry* e = catalog_by_title_id(g.title_id);
+    if (e && catalog_image(e->cover, w, h, out)) return true;
+    std::string png;
+    if (!g.path.empty() && service_icon(g.path, png) && catalog_image_from_blob(png, w, h, out)) return true;
+    return false;
+}
+
+// За один проход грузим не больше одной картинки (чтобы кнопки не «залипали»). true - что-то загрузили.
+static bool tile_images_step()
+{
+    int n = (int)g_games.size();
+    if ((int)g_tileImg.size() != n) { g_tileImg.assign((size_t)n, CatImage()); g_tileTried.assign((size_t)n, 0); }
+    int first = (g_topRow - 1) * COLS, last = (g_topRow + ROWS_VIS + 1) * COLS;   // видимые и соседние ряды
+    for (int i = 0; i < n; i++)
+        if ((i < first || i >= last) && g_tileTried[(size_t)i]) { g_tileImg[(size_t)i] = CatImage(); g_tileTried[(size_t)i] = 0; }
+    int vFirst = g_topRow * COLS, vLast = (g_topRow + ROWS_VIS) * COLS;
+    for (int i = vFirst; i < vLast && i < n; i++) {
+        if (g_tileTried[(size_t)i]) continue;
+        g_tileTried[(size_t)i] = 1;
+        load_game_image(g_games[(size_t)i], TILE_W, IMG_H, g_tileImg[(size_t)i]);
+        return true;
+    }
+    return false;
+}
+
+static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage* img)
 {
     Color bg = selected ? C_TILE_SEL : C_TILE;
     if (selected) fill(x - 5, y - 5, TILE_W + 10, TILE_H + 10, C_TAB_ON);
@@ -223,13 +258,15 @@ static void draw_tile(int x, int y, const Game& g, bool selected)
     for (size_t i = 0; i < g.title_id.size(); i++) h = h * 31 + (unsigned char)g.title_id[i];
     Color c = { (uint8_t)(50 + (h & 0x3F)), (uint8_t)(60 + ((h >> 6) & 0x3F)), (uint8_t)(80 + ((h >> 12) & 0x5F)) };
     fill(x, y, TILE_W, IMG_H, c);
-    std::string letter;
-    {
+    if (img && img->ok()) {
+        blit(*img, x, y);
+    } else {
+        std::string letter;
         const unsigned char* p = (const unsigned char*)g.title.c_str();
         const unsigned char* st = p;
         if (*p) { decode_utf8(p); letter = std::string((const char*)st, (size_t)(p - st)); }
+        draw_text(letter, x + (TILE_W - g_cellW) / 2, y + IMG_H / 2 + FONT_PX / 3, C_TEXT, c);
     }
-    draw_text(letter, x + (TILE_W - g_cellW) / 2, y + IMG_H / 2 + FONT_PX / 3, C_TEXT, c);
 
     // Размер игры в углу картинки
     std::string sz = fmt_size(g.size);
@@ -317,7 +354,8 @@ static void draw_available()
         for (int c = 0; c < COLS; c++) {
             int idx = (g_topRow + r) * COLS + c;
             if (idx >= (int)g_games.size()) break;
-            draw_tile(MARGIN_X + c * (TILE_W + gapX), GRID_TOP + r * (TILE_H + GAP_Y), g_games[(size_t)idx], idx == g_cursor);
+            draw_tile(MARGIN_X + c * (TILE_W + gapX), GRID_TOP + r * (TILE_H + GAP_Y), g_games[(size_t)idx], idx == g_cursor,
+                      (size_t)idx < g_tileImg.size() ? &g_tileImg[(size_t)idx] : nullptr);
         }
     }
     int rows = ((int)g_games.size() + COLS - 1) / COLS;
@@ -374,10 +412,15 @@ static void info_load(const Game& g)
 {
     info_clear();
     g_selCat = catalog_by_title_id(g.title_id);
-    if (!g_selCat) { logf_("ui: в каталоге нет %s", g.title_id.c_str()); return; }
+    if (!g_selCat) {
+        logf_("ui: в каталоге нет %s", g.title_id.c_str());
+        load_game_image(g, COVER_W, COVER_H, g_imgCover);   // хотя бы иконка из самого PKG
+        return;
+    }
     catalog_image(g_selCat->cover, COVER_W, COVER_H, g_imgCover);
     for (int i = 0; i < SHOT_N && i < (int)g_selCat->shots.size(); i++)
         catalog_image(g_selCat->shots[(size_t)i], SHOT_W, SHOT_H, g_imgShots[i]);
+    if (!g_imgCover.ok()) load_game_image(g, COVER_W, COVER_H, g_imgCover);
     g_selDesc = catalog_text(*g_selCat);
 }
 
@@ -640,7 +683,8 @@ static unsigned pad_read()
 
 bool ui_init()
 {
-    catalog_load("/app0/assets/misc");
+    // Для проверок: каталог можно положить на консоль в /data/ps4installer_app/catalog/ (тогда PKG собирают без него).
+    if (!catalog_load("/data/ps4installer_app/catalog")) catalog_load("/app0/assets/misc");
     g_scene = new Scene2D(FRAME_WIDTH, FRAME_HEIGHT, FRAME_DEPTH);
     if (!g_scene->Init(0xC000000, 2)) { logf_("ui: scene init FAILED"); return false; }
     if (!g_scene->InitFont(&g_font, "/app0/assets/fonts/DejaVuSansMono.ttf", FONT_PX)) { logf_("ui: font init FAILED"); return false; }
@@ -748,6 +792,7 @@ void ui_pump()
                     g_confirmErr.clear();
                     info_load(g_sel);
                     g_mode = MODE_CONFIRM;
+                    g_skipConfirmInput = true;
                     logf_("ui: окно установки: %s, нужно %llu, свободно %llu (ok=%d)", g_sel.title.c_str(),
                           (unsigned long long)g_selNeed, (unsigned long long)g_freeBytes, g_freeOk ? 1 : 0);
                 }
@@ -758,8 +803,10 @@ void ui_pump()
 
     if (g_svc == SVC_OK && g_mode == MODE_CONFIRM) {
         bool low = g_freeOk && g_selNeed > g_freeBytes;
-        if (pressed & ORBIS_PAD_BUTTON_CIRCLE) { info_clear(); g_mode = MODE_GRID; g_redraw = 2; }
-        else if ((pressed & ORBIS_PAD_BUTTON_CROSS) && !low) {
+        unsigned cp = g_skipConfirmInput ? 0 : pressed;
+        g_skipConfirmInput = false;
+        if (cp & ORBIS_PAD_BUTTON_CIRCLE) { info_clear(); g_mode = MODE_GRID; g_redraw = 2; }
+        else if ((cp & ORBIS_PAD_BUTTON_CROSS) && !low) {
             std::vector<std::string> paths;
             for (size_t i = 0; i < g_selFiles.size(); i++) paths.push_back(g_selFiles[i].path);
             std::string err;
@@ -789,6 +836,10 @@ void ui_pump()
             g_redraw = 2;
         }
     }
+
+    if (g_redraw == 0 && g_svc == SVC_OK && g_tab == TAB_AVAILABLE && g_mode == MODE_GRID && g_load == LS_OK &&
+        tile_images_step())
+        g_redraw = 2;
 
     bool drew = false;
     if (g_redraw > 0) {

@@ -7,7 +7,12 @@
 #include <string.h>
 
 #define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_JPEG
+#define STBI_NO_BMP
+#define STBI_NO_GIF
+#define STBI_NO_PSD
+#define STBI_NO_TGA
+#define STBI_NO_PIC
+#define STBI_NO_PNM
 #define STBI_NO_STDIO
 #define STBI_NO_LINEAR
 #define STBI_NO_HDR
@@ -108,7 +113,14 @@ bool catalog_image(const CatRef& ref, int w, int h, CatImage& out)
 {
     out = CatImage();
     std::string blob;
-    if (w <= 0 || h <= 0 || !read_blob(ref, blob)) return false;
+    if (!read_blob(ref, blob)) return false;
+    return catalog_image_from_blob(blob, w, h, out);
+}
+
+bool catalog_image_from_blob(const std::string& blob, int w, int h, CatImage& out)
+{
+    out = CatImage();
+    if (w <= 0 || h <= 0 || blob.empty()) return false;
     int sw = 0, sh = 0, comp = 0;
     unsigned char* src = stbi_load_from_memory((const unsigned char*)blob.data(), (int)blob.size(), &sw, &sh, &comp, 3);
     if (!src || sw <= 0 || sh <= 0) { if (src) stbi_image_free(src); return false; }

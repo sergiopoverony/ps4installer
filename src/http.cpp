@@ -7,6 +7,7 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -34,6 +35,7 @@ struct Request {
 struct Response {
     int code = 200;
     std::string body;
+    std::string content_type = "application/json; charset=utf-8";
 };
 
 const char* reason(int code) {
@@ -64,8 +66,21 @@ std::string pkg_json(const PkgInfo& p) {
            ",\"incomplete\":" + (p.incomplete() ? "true" : "false") + ",\"rus\":" + (p.rus ? "true" : "false") + ",\"dlc_name\":" + (p.dlc_name ? "true" : "false") + "}";
 }
 
+std::string url_decode(const std::string& s) {
+    std::string o;
+    for (size_t i = 0; i < s.size(); i++) {
+        if (s[i] == '%' && i + 2 < s.size() + 0 && isxdigit((unsigned char)s[i + 1]) && isxdigit((unsigned char)s[i + 2])) {
+            o += (char)strtol(s.substr(i + 1, 2).c_str(), nullptr, 16);
+            i += 2;
+        } else {
+            o += s[i];
+        }
+    }
+    return o;
+}
+
 Response route(const Request& rq) {
-    if (rq.path != "/status" && rq.path != "/health") {  // опрос состояния не засоряет журнал
+    if (rq.path != "/status" && rq.path != "/health" && rq.path != "/icon") {  // опрос состояния не засоряет журнал
         log_printf("http: %s %s (тело %d байт)", rq.method.c_str(), rq.path.c_str(), (int)rq.body.size());
     }
     Response r;
@@ -99,6 +114,17 @@ Response route(const Request& rq) {
         r.body = "{\"ok\":true,\"title_ids\":[";
         for (size_t i = 0; i < ids.size(); i++) r.body += (i ? ",\"" : "\"") + json_escape(ids[i]) + "\"";
         r.body += "]}";
+        return r;
+    }
+    if (rq.path == "/icon") {
+        size_t k = rq.query.find("path=");
+        std::string p = k == std::string::npos ? "" : url_decode(rq.query.substr(k + 5));
+        std::vector<uint8_t> icon;
+        if (!path_allowed(p) || !pkg_read_icon(p, &icon)) {
+            return json_error(404, "no_icon", p);
+        }
+        r.content_type = "image/png";
+        r.body.assign((const char*)icon.data(), icon.size());
         return r;
     }
     if (rq.path == "/status") {
@@ -218,7 +244,7 @@ void handle_client(int fd) {
     if (read_request(fd, &rq)) {
         Response r = route(rq);
         std::string out = "HTTP/1.1 " + std::to_string(r.code) + " " + reason(r.code) +
-                          "\r\nContent-Type: application/json; charset=utf-8\r\nContent-Length: " +
+                          "\r\nContent-Type: " + r.content_type + "\r\nContent-Length: " +
                           std::to_string(r.body.size()) + "\r\nConnection: close\r\n\r\n" + r.body;
         send_all(fd, out);
     }

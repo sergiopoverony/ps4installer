@@ -23,10 +23,13 @@ APPVER      := $(shell sed -n 's/.*APP_VERSION "\(.*\)".*/\1/p' ../src/version.h
 # create-gp4 знает только папки assets/audio, fonts, images, misc, videos (своя папка data ломает сборку).
 # Если каталога нет, в PKG он не кладётся: приложение работает, но без обложек и описаний.
 ASSETS      := assets/fonts/DejaVuSansMono.ttf assets/fonts/LICENSE-DejaVu.txt
+# make full NOCATALOG=1 - собрать PKG без каталога (для проверок: каталог кладут на консоль в /data/ps4installer_app/catalog/).
+ifeq ($(NOCATALOG),)
 ifneq ($(wildcard ../data/catalog.pak),)
 ASSETS      += assets/misc/catalog.json assets/misc/catalog.pak
 endif
-ASSETS      += assets/misc/ps4installerd.elf
+endif
+ASSETS      += assets/misc/ps4installerd.elf assets/misc/catalog.json assets/misc/catalog.pak
 
 # Системные модули для приложения (без libc.prx приложение сразу вылетает). Берутся из набора OpenOrbis.
 LIBMODULES  := sce_module/libc.prx sce_module/libSceFios2.prx
@@ -130,7 +133,7 @@ $(INTDIR)/%.o: $(PROJDIR)/%.cpp
 
 # Очистка только папок и файлов сборки внутри pkg/.
 clean:
-	rm -rf $(CONTENT_ID).pkg pkg.gp4 eboot.bin build sce_sys sce_module assets/misc/ps4installerd.elf
+	rm -rf $(CONTENT_ID).pkg pkg.gp4 eboot.bin build sce_sys sce_module assets/misc/ps4installerd.elf assets/misc/catalog.json assets/misc/catalog.pak
 
 # Собирает службу в корне (нужен PS4_PAYLOAD_SDK), затем чисто пересобирает PKG со свежей службой внутри.
 .PHONY: full
