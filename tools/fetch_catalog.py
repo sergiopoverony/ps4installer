@@ -121,6 +121,7 @@ def http_get(url, timeout=30, tries=4):
 _RATING_PRIORITY = {"Full Game": 0, "Game Bundle": 1, "Premium Edition": 2}
 _DROP_RATINGS = {"Soundtrack"}
 _TITLE_ID_RE = re.compile(r"-(CUSA\d{5})_")
+_PS5_ID_RE = re.compile(r"-(PPSA\d{5})_")
 
 _TITLE_PATTERNS = [
     re.compile(r"\s*[\(\[]\s*PS4[™®]?\s*(?:(?:&|and|\+|/)\s*PS5[™®]?)?\s*(?:version|edition)?\s*[\)\]]", re.I),
@@ -158,8 +159,10 @@ def select_games(items):
     for it in items:
         uuid = it.get("uuid", "")
         m = _TITLE_ID_RE.search(uuid)
+        if not m and "PS4" in (it.get("platforms") or []):
+            m = _PS5_ID_RE.search(uuid)  # игра для PS4 и PS5 под PS5-номером (Valhalla и др.): берём по названию
         if not m:
-            continue  # PS5 (PPSA) и всё без CUSA
+            continue  # чисто PS5 и всё без CUSA
         if it.get("rating") in _DROP_RATINGS:
             continue
         tid = m.group(1)
@@ -175,6 +178,8 @@ def select_games(items):
             "image": it.get("image", ""),
             "href": it.get("href", ""),
         })
+    cusa_names = {g["name"].lower() for g in games if g["id"].startswith("CUSA")}
+    games = [g for g in games if g["id"].startswith("CUSA") or g["name"].lower() not in cusa_names]
     games.sort(key=lambda g: (g["name"].lower(), g["id"]))
     return games
 
