@@ -30,6 +30,7 @@ extern "C" int sceSystemServiceHideSplashScreen(void);
 #define FRAME_HEIGHT  1080
 #define FRAME_DEPTH      4
 
+static const int TITLE_PX = 44;   // название игры в карточке
 static const int FONT_PX  = 30;   // крупно, чтобы читалось с дивана; подберём по телевизору
 static const int MARGIN_X = 40;
 static const int HEAD_H   = 90;
@@ -560,10 +561,14 @@ static void draw_info_top(const Game& g, int x, int y, int W)
     int rx = x + 30 + COVER_W + 30, rw = W - (rx - x) - 30;
     int maxc = rw / g_cellW;
     std::string en = g_selCat && !g_selCat->name_en.empty() ? g_selCat->name_en : g.title;
-    draw_text(fit_chars(en, maxc), rx, cy + FONT_PX, C_TEXT, C_PANEL);
+    // Название игры крупнее остального текста (шрифт моноширинный: ширина буквы растёт вместе с размером).
+    int bigCell = g_cellW * TITLE_PX / FONT_PX;
+    FT_Set_Pixel_Sizes(g_font, 0, TITLE_PX);
+    draw_text(fit_chars(en, rw / bigCell), rx, cy + TITLE_PX, C_TEXT, C_PANEL);
+    FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
     if (g_selCat && !g_selCat->name_ru.empty() && g_selCat->name_ru != en)
-        draw_text(fit_chars(g_selCat->name_ru, maxc), rx, cy + FONT_PX + FONT_PX + 8, C_DIM, C_PANEL);
-    int sy = cy + 2 * (FONT_PX + 8) + 12;
+        draw_text(fit_chars(g_selCat->name_ru, maxc), rx, cy + TITLE_PX + FONT_PX + 10, C_DIM, C_PANEL);
+    int sy = cy + TITLE_PX + FONT_PX + 26;
     for (int i = 0; i < SHOT_N; i++) {
         int sx = rx + i * (SHOT_W + SHOT_GAP);
         if (g_imgShots[i].ok()) blit(g_imgShots[i], sx, sy);
