@@ -39,7 +39,7 @@ COMMON = ["g++", "-std=c++17", "-g", "-pthread", "-fsanitize=address,undefined",
 def build():
     srcs = [str(p) for p in sorted((ROOT / "src").glob("*.cpp"))]
     subprocess.run(COMMON + DEFS + srcs + ["-o", str(BIN)], check=True)
-    unit_srcs = [str(ROOT / "src" / n) for n in ("pkg.cpp", "json.cpp")]
+    unit_srcs = [str(ROOT / "src" / n) for n in ("pkg.cpp", "json.cpp", "log.cpp")]
     subprocess.run(COMMON + DEFS + [str(ROOT / "tests" / "test_pkg.cpp")] + unit_srcs + ["-o", str(UNIT)], check=True)
 
 

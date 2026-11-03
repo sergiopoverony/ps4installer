@@ -1,11 +1,14 @@
 #include "pkg.h"
 
+#include "log.h"
+
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 
 #include <algorithm>
 #include <cstdio>
+#include <cerrno>
 #include <cstring>
 
 #ifndef DATA_PKG_DIR
@@ -171,6 +174,9 @@ static void scan_dir(const std::string& dir, int depth, size_t max_files, std::v
     }
     DIR* d = opendir(dir.c_str());
     if (!d) {
+        if (depth > 0) {
+            log_printf("scan: не открылась папка %s (errno=%d)", dir.c_str(), errno);
+        }
         return;
     }
     std::vector<std::string> names;
@@ -182,6 +188,9 @@ static void scan_dir(const std::string& dir, int depth, size_t max_files, std::v
     }
     closedir(d);
     std::sort(names.begin(), names.end());
+    if (depth > 0) {
+        log_printf("scan: папка %s, записей: %d", dir.c_str(), (int)names.size());
+    }
     for (const std::string& name : names) {
         if (out->size() >= max_files) {
             return;
@@ -189,6 +198,7 @@ static void scan_dir(const std::string& dir, int depth, size_t max_files, std::v
         std::string full = dir + "/" + name;
         struct stat st;
         if (stat(full.c_str(), &st) != 0) {
+            log_printf("scan: stat не удался для %s (errno=%d)", full.c_str(), errno);
             continue;
         }
         if (S_ISDIR(st.st_mode)) {
@@ -200,6 +210,8 @@ static void scan_dir(const std::string& dir, int depth, size_t max_files, std::v
             std::string err;
             if (pkg_read_header(full, &info, &err)) {
                 out->push_back(info);
+            } else {
+                log_printf("scan: файл отвергнут %s: %s", full.c_str(), err.c_str());
             }
         }
     }
