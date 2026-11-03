@@ -625,7 +625,20 @@ def needs_online(notice):
     return "online play required" in (notice or "").lower()
 
 
-def pack(games, cache_dir, out_dir, log=print, keep_online=False):
+def load_keep_ids(path):
+    """tools/keep_online.txt: Title ID по одному в строке, # - комментарий."""
+    ids = set()
+    try:
+        for line in Path(path).read_text(encoding="utf-8").splitlines():
+            line = line.split("#", 1)[0].strip()
+            if line:
+                ids.add(line.upper())
+    except OSError:
+        pass
+    return ids
+
+
+def pack(games, cache_dir, out_dir, log=print, keep_online=False, keep_ids=()):
     """Собирает catalog.pak + catalog.json из кэша. Возвращает (кол-во игр, размер pak).
     Игры, которым нужен интернет, не включаются (keep_online=True оставляет их)."""
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -654,7 +667,7 @@ def pack(games, cache_dir, out_dir, log=print, keep_online=False):
             if meta.get("status") not in ("ok", "partial"):
                 skipped += 1
                 continue
-            if not keep_online and needs_online(meta.get("notice")):
+            if not keep_online and g["id"] not in keep_ids and needs_online(meta.get("notice")):
                 removed.append("%s  %s" % (g["id"], g["name"]))
                 continue
             entry = {"id": g["id"], "cid": g["cid"], "n": g["name"]}
@@ -813,7 +826,8 @@ def main(argv=None):
             "nopage = страницы нет, neterr = сеть (повторится при следующем запуске), skip = уже было")
 
     if not opts.no_pack:
-        pack(games, cache_dir, out_dir, log, keep_online=opts.keep_online)
+        pack(games, cache_dir, out_dir, log, keep_online=opts.keep_online,
+             keep_ids=load_keep_ids(Path(__file__).resolve().parent / "keep_online.txt"))
         log("Готово. Файлы: %s и %s" % (out_dir / "catalog.pak", out_dir / "catalog.json"))
     return 0
 

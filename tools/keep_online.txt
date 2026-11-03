@@ -1,0 +1,15 @@
+# Игры, которые остаются в каталоге, хотя магазин пишет "Online play required".
+# Формат: Title ID, после # - название. Строки с # в начале игнорируются.
+CUSA06808  # Danganronpa 1-2 Reload
+CUSA49562  # Arcade Archives CRIME CITY
+CUSA08829  # Call of Duty: Modern Warfare
+CUSA07150  # METAL GEAR SURVIVE
+CUSA06362  # Elite Dangerous
+CUSA14405  # Tom Clancy's Ghost Recon Breakpoint
+CUSA01810  # Tom Clancy's The Division
+CUSA12639  # Tom Clancy's The Division 2
+CUSA17642  # HELLMUT: THE BADASS FROM HELL
+CUSA13114  # Switchblade
+CUSA45888  # Fun with the Fitzgeralds
+CUSA16058  # FOCUS on YOU
+CUSA57799  # Forest of Deceit
