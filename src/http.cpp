@@ -131,7 +131,10 @@ Response route(const Request& rq) {
     if (rq.path == "/free") {
         uint64_t b = 0;
         bool ok = platform::free_bytes("/user", &b);
-        r.body = std::string("{\"ok\":") + (ok ? "true" : "false") + ",\"free_bytes\":" + std::to_string((unsigned long long)b) + "}";
+        uint64_t t = 0;
+        if (!platform::total_bytes("/user", &t)) t = 0;
+        r.body = std::string("{\"ok\":") + (ok ? "true" : "false") + ",\"free_bytes\":" + std::to_string((unsigned long long)b) +
+                 ",\"total_bytes\":" + std::to_string((unsigned long long)t) + "}";
         return r;
     }
     if (rq.path == "/installed") {

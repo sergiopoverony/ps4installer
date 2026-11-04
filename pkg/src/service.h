@@ -35,7 +35,7 @@ bool service_install_autorun(std::string& err);
 int service_fw_major();
 
 // Свободное место на диске консоли (GET /free).
-bool service_free(uint64_t& bytes);
+bool service_free(uint64_t& bytes, uint64_t* total = nullptr);   // total - полный размер диска (0, если служба старая)
 // Иконка игры (icon0.png) из PKG через службу (GET /icon). false, если её нет.
 bool service_icon(const std::string& pkgPath, std::string& png);
 bool service_installed(std::vector<std::string>& ids);   // title_id установленных игр

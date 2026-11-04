@@ -317,6 +317,7 @@ static Game g_sel;                         // выбранная игра
 static std::vector<PkgItem> g_selFiles;    // что будет установлено (по порядку)
 static uint64_t g_selNeed = 0, g_freeBytes = 0;
 static bool g_freeOk = false;
+static uint64_t g_totalBytes = 0;          // полный размер диска (0 - неизвестен)
 static std::string g_confirmErr;           // отказ службы при запуске установки
 static bool g_instActive = false;          // установка идёт (опрашиваем /status)
 static bool g_instFinished = false;        // закончилась (успешно или с ошибкой), окно ещё не закрыто
@@ -454,6 +455,7 @@ static char letter_of(const std::string& t)
 }
 
 static bool g_letterHas[27];     // какие буквы есть в списке каталога: [0] - «#», [1..26] - A..Z
+static bool g_skipDeleteInput = false; // кнопка, открывшая окно удаления, не должна сразу его закрыть
 static bool g_stripFocus = false;  // фокус на алфавитной полосе (вкладка «Каталог игр»)
 static int letter_index(char c) { return c == '#' ? 0 : (c - 'A' + 1); }
 
@@ -634,7 +636,7 @@ static void load_img(const Game& g, int W_, int H_, CatImage& out)
 static void load_tile(const Game& g, CatImage& out) { load_img(g, TILE_W, IMG_H, out); }
 
 // Список запросов: маленькие иконки (в 3 раза меньше обложки в карточке).
-static const int REQ_ICON = 110, REQ_ROW_H = 120, REQ_ROWS_VIS = 7;
+static const int REQ_ICON = 96, REQ_ROW_H = 108, REQ_ROWS_VIS = 8;
 
 static bool request_images_step()
 {
@@ -865,32 +867,27 @@ static void draw_available()
                       (size_t)idx >= g_tileTried.size() || !g_tileTried[(size_t)idx]);
         }
     }
-    int rows = ((int)g_games.size() + COLS - 1) / COLS;
-    char pg[96];
-    if (g_tab == TAB_CATALOG) { draw_letter_strip(); return; }   // номер игры показывает сама полоса
-    snprintf(pg, sizeof(pg), "Игра %d из %d   ряд %d из %d", g_cursor + 1, (int)g_games.size(), g_cursor / COLS + 1, rows);
-    draw_text(pg, MARGIN_X, FRAME_HEIGHT - 90, C_DIM, C_BG);
+    if (g_tab == TAB_CATALOG) draw_letter_strip();
 }
 
 static int grid_top() { return g_tab == TAB_CATALOG ? HEAD_H + 70 : GRID_TOP; }   // в каталоге под шапкой алфавитная полоса
 
 static void draw_letter_strip()
 {
-    const int y = HEAD_H + 10, h = 52, cell = 52, gap = 6;
+    const int y = HEAD_H + 8, h = 54, gap = 6;
+    const int cell = (FRAME_WIDTH - 2 * MARGIN_X - 26 * gap) / 27;   // на всю ширину экрана
     char cur = g_games.empty() ? '#' : letter_of(g_games[(size_t)g_cursor].title);
     for (int i = 0; i < 27; i++) {
         char ch = i == 0 ? '#' : (char)('A' + i - 1);
         bool sel = ch == cur;
-        Color bg = sel ? (g_stripFocus ? C_TAB_ON : C_TILE_SEL) : C_TAB_OFF;
+        Color bg = sel ? (g_stripFocus ? C_BAR_NEED : C_TAB_ON) : C_TAB_OFF;
         int x = MARGIN_X + i * (cell + gap);
-        if (sel && g_stripFocus) fill(x - 3, y - 3, cell + 6, h + 6, C_TEXT);
+        if (sel) fill(x - 4, y - 4, cell + 8, h + 8, C_TEXT);   // белая рамка вокруг текущей буквы
         fill(x, y, cell, h, bg);
         std::string t(1, ch);
-        draw_text(t, x + (cell - g_cellW) / 2, y + 37, g_letterHas[i] ? C_TEXT : C_DIM, bg);
+        Color fg = sel ? (g_stripFocus ? C_BG : C_TEXT) : (g_letterHas[i] ? C_TEXT : C_DIM);
+        draw_text(t, x + (cell - g_cellW) / 2, y + 38, fg, bg);
     }
-    char pg[64];
-    snprintf(pg, sizeof(pg), "Игра %d из %d", g_cursor + 1, (int)g_games.size());
-    draw_text(pg, FRAME_WIDTH - MARGIN_X - text_w(pg), y + 37, C_DIM, C_BG);
 }
 
 static void draw_requests()
@@ -922,9 +919,6 @@ static void draw_requests()
         draw_text(fit_chars(g.title, (w - REQ_ICON - 28 - idw - 60) / g_cellW), tx, y + rh / 2 + FONT_PX / 3, C_TEXT, bg);
         draw_text(g.title_id, MARGIN_X + w - 20 - text_w(g.title_id), y + rh / 2 + FONT_PX / 3, C_DIM, bg);
     }
-    char pg[64];
-    snprintf(pg, sizeof(pg), "Запросов: %d   выбран %d", (int)g_games.size(), g_cursor + 1);
-    draw_text(pg, MARGIN_X, FRAME_HEIGHT - 90, C_DIM, C_BG);
 }
 
 static void draw_panel(int x, int y, int w, int h)
@@ -957,6 +951,7 @@ static std::string job_label(const InstallJob& j)
 
 // ---- Информация об игре из каталога (обложка, 4 скриншота, описание) ----
 static const int COVER_W = 350, COVER_H = 350;
+static const int COMPACT_COVER = 420;   // обложка в узкой карточке без описания
 static const int SHOT_W = 254, SHOT_H = 143, SHOT_GAP = 14, SHOT_N = 4;
 static const CatEntry* g_selCat = nullptr;
 static CatImage g_imgCover;
@@ -978,7 +973,7 @@ static void info_load(const Game& g)
     g_selCat = catalog_find(g.title_id, g.title, &how);
     if (!g_selCat) {
         logf_("ui: в каталоге нет %s (%s)", g.title_id.c_str(), g.title.c_str());
-        load_game_image(g, COVER_W, COVER_H, g_imgCover);   // хотя бы иконка из самого PKG
+        load_game_image(g, COMPACT_COVER, COMPACT_COVER, g_imgCover);   // хотя бы иконка из самого PKG (описания нет - карточка узкая)
         return;
     }
     logf_("ui: найдено в каталоге по %s: %s", how, g_selCat->name_en.c_str());
@@ -987,6 +982,12 @@ static void info_load(const Game& g)
         catalog_image(g_selCat->shots[(size_t)i], SHOT_W, SHOT_H, g_imgShots[i]);
     if (!g_imgCover.ok()) load_game_image(g, COVER_W, COVER_H, g_imgCover);
     g_selDesc = catalog_text(*g_selCat);
+    bool anyShot = false;
+    for (int i = 0; i < SHOT_N; i++) anyShot = anyShot || g_imgShots[i].ok();
+    if (g_selDesc.empty() && !anyShot) {   // карточка без описания: иконка крупнее
+        g_imgCover = CatImage();
+        if (!catalog_image(g_selCat->cover, COMPACT_COVER, COMPACT_COVER, g_imgCover)) load_game_image(g, COMPACT_COVER, COMPACT_COVER, g_imgCover);
+    }
 }
 
 static void blit(const CatImage& im, int x, int y)
@@ -1005,18 +1006,13 @@ static void blit(const CatImage& im, int x, int y)
     }
 }
 
-// Название игры размером TITLE_PX; если не влезает в maxw - шрифт уменьшается (не ниже TITLE_MIN_PX), потом «…».
+// Название игры размером TITLE_PX; если не влезает в maxw - обрезается с «…».
 static void draw_title_fit(const std::string& en, int x, int baseline, int maxw, bool center, Color bg)
 {
-    int px = TITLE_PX, cell = g_cellW, n = count_cp(en);
-    for (; px >= TITLE_MIN_PX; px--) {
-        FT_Set_Pixel_Sizes(g_font, 0, px);
-        cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : g_cellW * px / FONT_PX;
-        if (cell < 1) cell = 1;
-        if (n * cell <= maxw) break;
-    }
-    if (px < TITLE_MIN_PX) { px = TITLE_MIN_PX; FT_Set_Pixel_Sizes(g_font, 0, px); }
-    std::string t = fit_chars(en, maxw / cell);
+    FT_Set_Pixel_Sizes(g_font, 0, TITLE_PX);
+    int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : g_cellW * TITLE_PX / FONT_PX;
+    if (cell < 1) cell = 1;
+    std::string t = fit_chars(en, maxw / cell);   // не влезло - обрезаем и ставим «…», размер не меняем
     draw_text(t, center ? x + (maxw - count_cp(t) * cell) / 2 : x, baseline, C_TEXT, bg);
     FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
 }
@@ -1058,6 +1054,42 @@ static void draw_info_top(const Game& g, int x, int y, int W)
     FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
 }
 
+// Полоска занятого места шириной w: серая основа, занято - синее, нужно для игры - оранжевое и толще, дальше свободно -
+// зеленоватое. Под ней подписи. Возвращает занятую высоту.
+static const Color C_BAR_TRACK = { 95, 100, 112 };
+static const Color C_BAR_USED  = { 70, 130, 230 };
+static const Color C_BAR_NEED  = { 255, 150, 40 };
+static const Color C_BAR_FREE  = { 120, 200, 150 };
+
+static int draw_space_info(int x, int y, int w, bool center)
+{
+    const int needH = 24, barH = 12;
+    int bt = y + (needH - barH) / 2;
+    if (g_freeOk && g_totalBytes > 0) {
+        double total = (double)g_totalBytes;
+        double usedF = total - (double)g_freeBytes;
+        if (usedF < 0) usedF = 0;
+        int usedW = (int)(w * usedF / total);
+        double needAvail = (double)g_selNeed < (double)g_freeBytes ? (double)g_selNeed : (double)g_freeBytes;
+        int needW = needAvail > 0 ? (int)(w * needAvail / total) : 0;
+        if (g_selNeed > 0 && needW < 4) needW = 4;
+        if (usedW + needW > w) usedW = w - needW;
+        fill(x, bt, w, barH, C_BAR_TRACK);
+        fill(x, bt, usedW, barH, C_BAR_USED);
+        fill(x + usedW + needW, bt, w - usedW - needW, barH, C_BAR_FREE);
+        fill(x + usedW, y, needW, needH, C_BAR_NEED);
+    }
+    FT_Set_Pixel_Sizes(g_font, 0, DESC_PX);
+    int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : g_cellW * DESC_PX / FONT_PX;
+    int ly = y + needH + 10 + DESC_PX;
+    std::string a = "Нужно: " + fmt_size(g_selNeed);
+    std::string b = g_freeOk ? "Свободно: " + fmt_size(g_freeBytes) : "Свободное место узнать не удалось";
+    draw_text(a, center ? x + (w - count_cp(a) * cell) / 2 : x, ly, C_BAR_NEED, C_PANEL);
+    draw_text(b, center ? x + (w - count_cp(b) * cell) / 2 : x, ly + DESC_PX + 8, g_freeOk ? C_BAR_FREE : C_WARN, C_PANEL);
+    FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
+    return needH + 10 + 2 * (DESC_PX + 8);
+}
+
 // Нет ни описания, ни скриншотов: окно почти квадратное. Название сверху, под ним иконка, ниже сведения и кнопки столбиком.
 static bool card_is_compact()
 {
@@ -1068,17 +1100,16 @@ static bool card_is_compact()
 
 static void draw_confirm_compact()
 {
-    const int W = 640;
+    const int W = 1180;
     bool launch = g_cardReason == CARD_LAUNCH, request = g_cardReason == CARD_REQUEST;
     bool low = g_cardReason == CARD_OK && g_freeOk && g_selNeed > g_freeBytes;
     bool can = g_cardReason == CARD_OK && !low;
-    std::vector<std::string> hints;
-    if (launch) { hints.push_back("{X} - запустить игру"); hints.push_back("{T} - удалить"); hints.push_back("{O} - закрыть"); }
-    else if (request) { hints.push_back("{X} - запросить"); hints.push_back("{O} - закрыть"); }
+    std::string hint;   // все кнопки в одну строку
+    if (launch) hint = "{X} - запустить игру    {T} - удалить    {O} - закрыть";
+    else if (request) hint = "{X} - запросить    {O} - закрыть";
     else {
-        hints.push_back(can ? "{X} - установить" : "{X} - установить (недоступно)");
-        if (g_cardReason == CARD_QUEUED) hints.push_back("{T} - ход установки");
-        hints.push_back("{O} - закрыть");
+        hint = can ? "{X} - установить    {O} - закрыть" : "{X} - установить (недоступно)    {O} - закрыть";
+        if (g_cardReason == CARD_QUEUED) hint += "    {T} - ход установки";
     }
     int H = 0;
     for (int pass = 0; pass < 2; pass++) {
@@ -1087,34 +1118,30 @@ static void draw_confirm_compact()
         int cur = y + 28;
         if (draw) { draw_panel(x, y, W, H); draw_title_fit(g_selCat && !g_selCat->name_en.empty() ? g_selCat->name_en : g_sel.title, x + 30, cur + TITLE_PX, W - 60, true, C_PANEL); }
         cur += TITLE_PX + 26;
-        int cx = x + (W - COVER_W) / 2;
+        int cw = g_imgCover.ok() ? g_imgCover.w : COMPACT_COVER, ch = g_imgCover.ok() ? g_imgCover.h : COMPACT_COVER;
+        int cx = x + (W - cw) / 2;
         if (draw) {
             if (g_imgCover.ok()) blit(g_imgCover, cx, cur);
             else {
-                fill(cx, cur, COVER_W, COVER_H, C_TILE);
+                fill(cx, cur, cw, ch, C_TILE);
                 std::string l = g_sel.title.empty() ? "?" : g_sel.title.substr(0, 1);
                 const unsigned char* p = (const unsigned char*)g_sel.title.c_str();
                 const unsigned char* st = p;
                 if (*p) { decode_utf8(p); l = std::string((const char*)st, (size_t)(p - st)); }
-                draw_text(l, cx + (COVER_W - g_cellW) / 2, cur + COVER_H / 2 + FONT_PX / 3, C_DIM, C_TILE);
+                draw_text(l, cx + (cw - g_cellW) / 2, cur + ch / 2 + FONT_PX / 3, C_DIM, C_TILE);
             }
         }
-        cur += COVER_H + 30;
-        if (!launch && !request) {   // сколько нужно и сколько свободно
-            std::string need = "Нужно места: " + fmt_size(g_selNeed);
-            std::string fr = g_freeOk ? "Свободно: " + fmt_size(g_freeBytes) : "Свободное место узнать не удалось";
-            if (draw) {
-                draw_text(need, x + (W - text_w(need)) / 2, cur + FONT_PX, C_TEXT, C_PANEL);
-                draw_text(fr, x + (W - text_w(fr)) / 2, cur + 2 * FONT_PX + 10, g_freeOk ? C_TEXT : C_WARN, C_PANEL);
-            }
-            cur += 2 * FONT_PX + 30;
+        cur += ch + 26;
+        if (!launch && !request) {
+            if (draw) draw_space_info(cx, cur, cw, true);
+            cur += 24 + 10 + 2 * (DESC_PX + 8) + 18;
             const char* msg = g_cardReason == CARD_INSTALLED ? "УЖЕ УСТАНОВЛЕНО" : g_cardReason == CARD_INCOMPLETE ? "НЕ ДОКАЧАНО" :
                               g_cardReason == CARD_QUEUED ? "УЖЕ В ОЧЕРЕДИ" : low ? "МАЛО МЕСТА - УДАЛИТЕ НЕНУЖНУЮ ИГРУ" : "";
             if (msg[0]) {
                 Color bg = g_cardReason == CARD_INCOMPLETE || low ? C_RED_BG : g_cardReason == CARD_INSTALLED ? C_GREEN : C_WARN;
                 Color fg = (g_cardReason == CARD_INCOMPLETE || low) ? C_TEXT : C_BG;
-                std::string m = msg;
-                if (draw) { fill(x + 30, cur, W - 60, 52, bg); draw_text(fit_chars(m, (W - 80) / g_cellW), x + (W - std::min(text_w(m), W - 80)) / 2, cur + 36, fg, bg); }
+                std::string m = fit_chars(msg, (W - 80) / g_cellW);
+                if (draw) { fill(x + 30, cur, W - 60, 52, bg); draw_text(m, x + (W - text_w(m)) / 2, cur + 36, fg, bg); }
                 cur += 52 + 18;
             }
         }
@@ -1123,11 +1150,8 @@ static void draw_confirm_compact()
             if (draw) draw_text(m, x + (W - text_w(m)) / 2, cur + FONT_PX, g_confirmOk ? C_GREEN : C_WARN, C_PANEL);
             cur += FONT_PX + 22;
         }
-        for (size_t i = 0; i < hints.size(); i++) {
-            if (draw) draw_hint(hints[i], x + (W - hint_w(hints[i])) / 2, cur + FONT_PX + 4, (launch || request || can || i > 0) ? C_TEXT : C_DIM, C_PANEL);
-            cur += ICON_S + 12;
-        }
-        cur += 14;
+        if (draw) draw_hint(hint, x + (W - hint_w(hint)) / 2, cur + ICON_S - 6, (launch || request || can) ? C_TEXT : C_DIM, C_PANEL);
+        cur += ICON_S + 26;
         if (!draw) H = cur - y;
     }
 }
@@ -1158,32 +1182,25 @@ static void draw_confirm()
         return;
     }
 
-    // Только главное: сколько нужно и сколько свободно.
-    draw_text("Нужно места: " + fmt_size(g_selNeed), tx, ty, C_TEXT, C_PANEL);
-    if (g_freeOk) {
-        std::string fr = "Свободно: " + fmt_size(g_freeBytes);
-        draw_text(fr, x + W - 40 - text_w(fr), ty, C_TEXT, C_PANEL);
-    } else {
-        std::string fr = "Свободное место узнать не удалось";
-        draw_text(fr, x + W - 40 - text_w(fr), ty, C_WARN, C_PANEL);
-    }
-
+    // Под обложкой: полоска места и подписи; справа от неё - причина, почему нельзя ставить, или предупреждение.
+    int sx = x + 30, sy = y + 30 + COVER_H + 24;
+    draw_space_info(sx, sy, COVER_W, false);
     bool low = g_cardReason == CARD_OK && g_freeOk && g_selNeed > g_freeBytes;
-    int by = y + H - 130;
+    int bx = x + 30 + COVER_W + 30, bw = W - (bx - x) - 30, by = sy;
     if (g_cardReason != CARD_OK) {
         const char* msg = g_cardReason == CARD_INSTALLED ? "УЖЕ УСТАНОВЛЕНО" :
                           g_cardReason == CARD_INCOMPLETE ? "НЕ ДОКАЧАНО - ДОЖДИТЕСЬ ЗАГРУЗКИ ФАЙЛОВ" : "УЖЕ В ОЧЕРЕДИ НА УСТАНОВКУ";
         Color bg = g_cardReason == CARD_INCOMPLETE ? C_RED_BG : g_cardReason == CARD_INSTALLED ? C_GREEN : C_WARN;
         Color fg = g_cardReason == CARD_INCOMPLETE ? C_TEXT : C_BG;
-        fill(tx, by, W - 80, 52, bg);
+        fill(bx, by, bw, 52, bg);
         std::string m = msg;
-        draw_text(m, x + (W - text_w(m)) / 2, by + 36, fg, bg);
+        draw_text(m, bx + (bw - text_w(m)) / 2, by + 36, fg, bg);
     } else if (low) {
-        fill(tx, by, W - 80, 52, C_RED_BG);
+        fill(bx, by, bw, 52, C_RED_BG);
         std::string msg = "МАЛО МЕСТА - УДАЛИТЕ НЕНУЖНУЮ ИГРУ";
-        draw_text(msg, x + (W - text_w(msg)) / 2, by + 36, C_TEXT, C_RED_BG);
+        draw_text(msg, bx + (bw - text_w(msg)) / 2, by + 36, C_TEXT, C_RED_BG);
     } else if (!g_confirmErr.empty()) {
-        draw_text(fit_chars(g_confirmErr, maxc), tx, by + 36, C_WARN, C_PANEL);
+        draw_text(fit_chars(g_confirmErr, bw / g_cellW), bx, by + 36, C_WARN, C_PANEL);
     }
     bool can = g_cardReason == CARD_OK && !low;
     std::string hint = can ? "{X} - установить      {O} - закрыть" : "{X} - установить (недоступно)      {O} - закрыть";
@@ -1341,7 +1358,7 @@ static void draw_all()
     if (g_tab == TAB_INSTALLED && g_mode == MODE_GRID)
         hint = "{X} - открыть    {T} - удалить    {S} - обновить";
     else if (g_tab == TAB_CATALOG && g_mode == MODE_GRID)
-        hint = g_stripFocus ? "влево / вправо - буква    вниз - к играм    {l} / {r} - по буквам" : "{X} - информация    вверх - алфавит    {l} / {r} - по буквам";
+        hint = g_stripFocus ? "влево / вправо - буква    вниз - к играм    {T} - к играм" : "{X} - информация    {T} - алфавит    {l} / {r} - по буквам";
     else if (g_tab == TAB_REQUESTS && g_mode == MODE_GRID)
         hint = g_games.empty() ? "" : "{O} - удалить из списка";
     else if (g_tab == TAB_AVAILABLE && g_mode == MODE_GRID)
@@ -1557,19 +1574,20 @@ void ui_pump()
                 if (g_tab == TAB_CATALOG && g_stripFocus) {
                     if (dy > 0) { g_stripFocus = false; g_redraw = 2; }
                     else if (dx) strip_step(dx);
-                } else if (g_tab == TAB_CATALOG && dy < 0 && g_cursor < COLS) { g_stripFocus = true; g_redraw = 2; }
+                }
                 else cursor_move(dx, dy);
             }
             if (g_mode == MODE_GRID && g_tab == TAB_INSTALLED && (pressed & ORBIS_PAD_BUTTON_TRIANGLE) && !g_games.empty()) {
                 g_sel = g_games[(size_t)g_cursor];
                 g_deleteErr.clear();
                 g_deleteFrom = MODE_GRID;
-                g_mode = MODE_DELETE;
+                g_mode = MODE_DELETE; g_skipDeleteInput = true;
                 g_redraw = 2;
             } else if (g_mode == MODE_GRID && g_tab == TAB_AVAILABLE && (pressed & ORBIS_PAD_BUTTON_TRIANGLE) && (g_instActive || g_instFinished)) {
                 g_mode = MODE_PROGRESS;
                 g_redraw = 2;
             }
+            if (g_mode == MODE_GRID && g_tab == TAB_CATALOG && (pressed & ORBIS_PAD_BUTTON_TRIANGLE)) { g_stripFocus = !g_stripFocus; g_redraw = 2; }
             if (g_mode == MODE_GRID && g_tab == TAB_CATALOG && (pressed & ORBIS_PAD_BUTTON_L2)) jump_letter(-1);
             if (g_mode == MODE_GRID && g_tab == TAB_CATALOG && (pressed & ORBIS_PAD_BUTTON_R2)) jump_letter(1);
             if (g_mode == MODE_GRID && g_tab == TAB_CATALOG && !g_stripFocus && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
@@ -1598,8 +1616,8 @@ void ui_pump()
                              : (g_instActive && game_queued(g_sel)) ? CARD_QUEUED : CARD_OK;
                 g_selFiles = install_files(g_sel, service_fw_major());
                 g_selNeed = install_bytes(g_sel, service_fw_major()) + (g_instActive ? pending_bytes() : 0);
-                g_freeOk = service_free(g_freeBytes);
-                if (!g_freeOk) g_freeOk = service_free(g_freeBytes);   // одна повторная попытка
+                g_freeOk = service_free(g_freeBytes, &g_totalBytes);
+                if (!g_freeOk) g_freeOk = service_free(g_freeBytes, &g_totalBytes);   // одна повторная попытка
                 if (!g_freeOk) {   // служба пропала (упала или закрыта): запускаем заново, как при старте приложения
                     logf_("ui: служба не отвечает, перезапускаем");
                     g_svc = SVC_CHECK;
@@ -1633,7 +1651,7 @@ void ui_pump()
                 g_sel = g_games[(size_t)g_cursor];
                 g_deleteErr.clear();
                 g_deleteFrom = MODE_GRID;
-                g_mode = MODE_DELETE;
+                g_mode = MODE_DELETE; g_skipDeleteInput = true;
                 g_redraw = 2;
             }
         }
@@ -1647,7 +1665,7 @@ void ui_pump()
         else if ((cp & ORBIS_PAD_BUTTON_TRIANGLE) && g_cardReason == CARD_LAUNCH) {
             g_deleteErr.clear();
             g_deleteFrom = MODE_CONFIRM;
-            g_mode = MODE_DELETE;
+            g_mode = MODE_DELETE; g_skipDeleteInput = true;
             g_redraw = 2;
         }
         else if ((cp & ORBIS_PAD_BUTTON_CROSS) && g_cardReason == CARD_REQUEST) {
@@ -1687,8 +1705,10 @@ void ui_pump()
             g_redraw = 2;
         }
     } else if (g_svc == SVC_OK && g_mode == MODE_DELETE) {
-        if (pressed & ORBIS_PAD_BUTTON_CIRCLE) { g_mode = g_deleteFrom; g_redraw = 2; }
-        else if ((pressed & ORBIS_PAD_BUTTON_CROSS) && g_tab == TAB_REQUESTS) {
+        unsigned dp = g_skipDeleteInput ? 0 : pressed;
+        g_skipDeleteInput = false;
+        if (dp & ORBIS_PAD_BUTTON_CIRCLE) { g_mode = g_deleteFrom; g_redraw = 2; }
+        else if ((dp & ORBIS_PAD_BUTTON_CROSS) && g_tab == TAB_REQUESTS) {
             if (req_remove(g_sel)) {
                 logf_("ui: запрос удалён из списка: %s", g_sel.title.c_str());
                 g_mode = MODE_GRID;
@@ -1696,7 +1716,7 @@ void ui_pump()
             } else g_deleteErr = "Не удалось изменить список запросов";
             g_redraw = 2;
         }
-        else if (pressed & ORBIS_PAD_BUTTON_CROSS) {
+        else if (dp & ORBIS_PAD_BUTTON_CROSS) {
             std::string err;
             logf_("ui: удаление игры %s (%s)", g_sel.title.c_str(), g_sel.title_id.c_str());
             if (service_uninstall(g_sel.title_id, err)) {

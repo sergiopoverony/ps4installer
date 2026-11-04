@@ -281,12 +281,13 @@ class ServiceTests(unittest.TestCase):
 
     def test_no_space(self):
         p = make_pkg(DATA_PKG / "big.pkg", "UP0001-CUSA00031_00-BIGBIGBIGBIGBIGB", 0x10000)
-        self.srv = Server(env={"FAKE_FREE_BYTES": "1000"})
+        self.srv = Server(env={"FAKE_FREE_BYTES": "1000", "FAKE_TOTAL_BYTES": "5000"})
         code, j = self.srv.post("/install", {"paths": [p]})
         self.assertEqual((code, j["error"]), (409, "no_space"))
         self.assertEqual(j["need"], 0x10000)
         self.assertEqual(j["free"], 1000)
         self.assertEqual(self.srv.get("/free")[1]["free_bytes"], 1000)
+        self.assertEqual(self.srv.get("/free")[1]["total_bytes"], 5000)
         self.assertEqual(self.srv.get("/installed")[1]["title_ids"], [])
         self.assertEqual(self.srv.get("/status")[1]["jobs"], [])
 

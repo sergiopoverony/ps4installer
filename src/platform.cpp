@@ -133,6 +133,20 @@ bool free_bytes(const char* path, uint64_t* out) {
     return true;
 }
 
+bool total_bytes(const char* path, uint64_t* out) {
+    const char* env = getenv("FAKE_TOTAL_BYTES");
+    if (env) {
+        *out = strtoull(env, nullptr, 10);
+        return true;
+    }
+    struct statvfs sv;
+    if (statvfs(path, &sv) != 0) {
+        return false;
+    }
+    *out = (uint64_t)sv.f_blocks * sv.f_frsize;
+    return true;
+}
+
 int firmware_major(std::string* text) {
     const char* env = getenv("FAKE_FW");  // например "13.02" или "9.00"
     std::string v = env ? env : "13.02";
@@ -423,6 +437,15 @@ bool free_bytes(const char* path, uint64_t* out) {
         return false;
     }
     *out = (uint64_t)sf.f_bavail * (uint64_t)sf.f_bsize;
+    return true;
+}
+
+bool total_bytes(const char* path, uint64_t* out) {
+    struct statfs sf;
+    if (statfs(path, &sf) != 0) {
+        return false;
+    }
+    *out = (uint64_t)sf.f_blocks * (uint64_t)sf.f_bsize;
     return true;
 }
 

@@ -27,6 +27,8 @@ bool launch_app(const std::string& title_id, std::string* err);
 bool uninstall_app(const std::string& title_id, std::string* err);
 void power_tick();                    // не давать консоли уйти в сон на время установки
 bool free_bytes(const char* path, uint64_t* out);
+// Полный размер диска, на котором лежит path (для полоски занятого места). На ПК: FAKE_TOTAL_BYTES.
+bool total_bytes(const char* path, uint64_t* out);
 
 // Версия прошивки консоли: возвращает основную часть (13 для 13.02) или -1, если узнать не удалось.
 // В *text - строка версии для журнала и /health.

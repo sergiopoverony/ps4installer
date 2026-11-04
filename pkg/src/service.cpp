@@ -59,13 +59,14 @@ static std::string json_quote(const std::string& s)
     return o + "\"";
 }
 
-bool service_free(uint64_t& bytes)
+bool service_free(uint64_t& bytes, uint64_t* total)
 {
     HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, "/free", 3000);
     if (!r.connected || r.status != 200) return false;
     JsonValue j;
     if (!json_parse(r.body, j) || !j["ok"].asBool()) return false;
     bytes = (uint64_t)j["free_bytes"].asNum();
+    if (total) *total = (uint64_t)j["total_bytes"].asNum();
     return true;
 }
 
