@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <sys/stat.h>
 #include <algorithm>
 #include <map>
 #include <string>
@@ -124,56 +125,68 @@ static int text_w(const std::string& s) { return count_cp(s) * g_cellW; }
 static void fill(int x, int y, int w, int h, Color c) { g_scene->FillRect(x, y, w, h, c); }
 
 // ---- Значки кнопок геймпада. В тексте подсказок: {X} крест, {O} круг, {S} квадрат, {T} треугольник.
-static const int ICON_S = 26;
-static int icon_w(char kind) { return (kind == 'L' || kind == 'R') ? 50 : ICON_S; }   // плечевые кнопки шире
+static const int ICON_S = 38;
+static int icon_w(char kind) { return (kind == 'L' || kind == 'R') ? ICON_S * 2 : ICON_S; }   // плечевые кнопки шире
 
-static bool in_round_rect(int px, int py, int x0, int y0, int w, int h, int r)
+// Попадает ли точка (fx, fy) внутрь рисунка значка (координаты в пикселях внутри квадрата ICON_S).
+static bool icon_sample(char kind, double fx, double fy)
+{
+    const double R = ICON_S / 2.0;
+    double dx = fx - R, dy = fy - R, d = sqrt(dx * dx + dy * dy);
+    if (d > R) return false;
+    if (d >= R - 3.0) return true;   // кольцо
+    double u = dx / (R * 0.5), v = dy / (R * 0.5);
+    const double t = 0.24;
+    if (kind == 'X') return fabs(u) <= 1.0 && fabs(v) <= 1.0 && (fabs(u - v) < t * 1.3 || fabs(u + v) < t * 1.3);
+    if (kind == 'O') { double r = sqrt(u * u + v * v); return r <= 1.0 && r >= 1.0 - 2 * t; }
+    if (kind == 'S') return fabs(u) <= 0.95 && fabs(v) <= 0.95 && !(fabs(u) < 0.95 - 2 * t && fabs(v) < 0.95 - 2 * t);
+    bool out = v >= -1.0 && v <= 0.8 && fabs(u) <= (v + 1.0) / 1.8;
+    double u2 = u / 0.5, v2 = v / 0.5 + 0.35;   // уменьшенный треугольник для выреза
+    bool in = v2 >= -1.0 && v2 <= 0.8 && fabs(u2) <= (v2 + 1.0) / 1.8;
+    return out && !in;
+}
+
+static bool rr_sample(double px, double py, double x0, double y0, double w, double h, double r)
 {
     if (px < x0 || py < y0 || px >= x0 + w || py >= y0 + h) return false;
-    int cx = px < x0 + r ? x0 + r : (px > x0 + w - 1 - r ? x0 + w - 1 - r : px);
-    int cy = py < y0 + r ? y0 + r : (py > y0 + h - 1 - r ? y0 + h - 1 - r : py);
+    double cx = px < x0 + r ? x0 + r : (px > x0 + w - r ? x0 + w - r : px);
+    double cy = py < y0 + r ? y0 + r : (py > y0 + h - r ? y0 + h - r : py);
     return (px - cx) * (px - cx) + (py - cy) * (py - cy) <= r * r;
+}
+
+static Color mix(Color a, Color b, int cov9)   // a - значок, b - фон; cov9 из 9
+{
+    Color c;
+    c.r = (uint8_t)((a.r * cov9 + b.r * (9 - cov9)) / 9);
+    c.g = (uint8_t)((a.g * cov9 + b.g * (9 - cov9)) / 9);
+    c.b = (uint8_t)((a.b * cov9 + b.b * (9 - cov9)) / 9);
+    return c;
 }
 
 static void draw_pad_icon(char kind, int x, int top, Color bg = C_BG)
 {
-    if (kind == 'L' || kind == 'R') {   // L1 / R1: скруглённая рамка с подписью
-        const int w = icon_w(kind), h = ICON_S - 4, y0 = top + 2;
-        Color col = { 175, 180, 200 };
-        for (int yy = 0; yy < h; yy++)
-            for (int xx = 0; xx < w; xx++)
-                if (in_round_rect(xx, yy, 0, 0, w, h, 6) && !in_round_rect(xx, yy, 2, 2, w - 4, h - 4, 4))
-                    g_scene->PutPixel(x + xx, y0 + yy, col);
-        FT_Set_Pixel_Sizes(g_font, 0, 16);
-        int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : 9;
-        draw_text(kind == 'L' ? "L1" : "R1", x + (w - 2 * cell) / 2, y0 + h - 5, col, bg);
-        FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
-        return;
-    }
+    bool shoulder = kind == 'L' || kind == 'R';
     Color col = kind == 'X' ? Color{ 110, 160, 255 } : kind == 'O' ? Color{ 255, 105, 105 } :
-                kind == 'S' ? Color{ 235, 135, 205 } : Color{ 95, 215, 150 };
-    const double R = ICON_S / 2.0;
-    for (int yy = 0; yy < ICON_S; yy++) {
-        for (int xx = 0; xx < ICON_S; xx++) {
-            double dx = xx + 0.5 - R, dy = yy + 0.5 - R;
-            double d = sqrt(dx * dx + dy * dy);
-            bool on = false;
-            if (d <= R && d >= R - 2.2) on = true;          // кольцо
-            else if (d < R - 2.2) {                          // знак внутри
-                double u = dx / (R * 0.5), v = dy / (R * 0.5);
-                const double t = 0.24;
-                if (kind == 'X') on = fabs(u) <= 1.0 && fabs(v) <= 1.0 && (fabs(u - v) < t * 1.3 || fabs(u + v) < t * 1.3);
-                else if (kind == 'O') { double r = sqrt(u * u + v * v); on = r <= 1.0 && r >= 1.0 - 2 * t; }
-                else if (kind == 'S') on = fabs(u) <= 0.95 && fabs(v) <= 0.95 && !(fabs(u) < 0.95 - 2 * t && fabs(v) < 0.95 - 2 * t);
-                else {
-                    bool out = v >= -1.0 && v <= 0.8 && fabs(u) <= (v + 1.0) / 1.8;
-                    double u2 = u / 0.5, v2 = v / 0.5 + 0.35;   // уменьшенный треугольник для выреза
-                    bool in = v2 >= -1.0 && v2 <= 0.8 && fabs(u2) <= (v2 + 1.0) / 1.8;
-                    on = out && !in;
+                kind == 'S' ? Color{ 235, 135, 205 } : kind == 'T' ? Color{ 95, 215, 150 } : Color{ 175, 180, 200 };
+    const int w = icon_w(kind), h = shoulder ? ICON_S - 10 : ICON_S, y0 = shoulder ? top + 5 : top;
+    for (int yy = 0; yy < h; yy++) {
+        for (int xx = 0; xx < w; xx++) {
+            int cov = 0;
+            for (int sy = 0; sy < 3; sy++)
+                for (int sx = 0; sx < 3; sx++) {
+                    double fx = xx + (sx + 0.5) / 3.0, fy = yy + (sy + 0.5) / 3.0;
+                    bool on = shoulder ? (rr_sample(fx, fy, 0, 0, w, h, 8) && !rr_sample(fx, fy, 2.5, 2.5, w - 5, h - 5, 5.5))
+                                       : icon_sample(kind, fx, fy);
+                    if (on) cov++;
                 }
-            }
-            if (on) g_scene->PutPixel(x + xx, top + yy, col);
+            if (cov) g_scene->PutPixel(x + xx, y0 + yy, mix(col, bg, cov));
         }
+    }
+    if (shoulder) {
+        FT_Set_Pixel_Sizes(g_font, 0, 21);
+        int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : 12;
+        draw_text(kind == 'L' ? "L1" : "R1", x + (w - 2 * cell) / 2, y0 + h - 7, col, bg);
+        FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
     }
 }
 
@@ -196,7 +209,7 @@ static void draw_hint(const std::string& s, int x, int baseline, Color fg, Color
         if (s[i] == '{' && i + 2 < s.size() && s[i + 2] == '}') {
             draw_text(seg, x, baseline, fg, bg);
             x += text_w(seg);
-            draw_pad_icon(s[i + 1], x, baseline - ICON_S + 3, bg);
+            draw_pad_icon(s[i + 1], x, baseline - ICON_S + 6, bg);
             x += icon_w(s[i + 1]) + 4;
             seg.clear();
             i += 3;
@@ -408,6 +421,61 @@ static bool load_game_image(const Game& g, int w, int h, CatImage& out)
     return false;
 }
 
+// ---- Кэш готовых плиток на диске: /data/ps4installer_app/cache. Плитка уже уменьшена и обрезана, читается
+// почти мгновенно (без разбора большого JPEG). Название файла включает размер плитки, Title ID и число игр
+// в каталоге (новый каталог - новые файлы). Чтобы сбросить кэш, достаточно удалить папку.
+static const char* CACHE_DIR = "/data/ps4installer_app/cache";
+
+static std::string tile_cache_path(const Game& g, int w, int h)
+{
+    if (g.title_id.empty()) return "";
+    char b[64];
+    snprintf(b, sizeof(b), "/t%dx%d_n%d_", w, h, catalog_count());
+    return std::string(CACHE_DIR) + b + g.title_id + (g.console ? "_c" : "_a") + ".raw";
+}
+
+static bool tile_cache_read(const std::string& path, int w, int h, CatImage& out)
+{
+    if (path.empty()) return false;
+    FILE* f = fopen(path.c_str(), "rb");
+    if (!f) return false;
+    std::vector<unsigned char> rgb((size_t)w * h * 3);
+    bool ok = fread(rgb.data(), 1, rgb.size(), f) == rgb.size();
+    unsigned char extra;
+    ok = ok && fread(&extra, 1, 1, f) == 0;   // файл ровно нужного размера
+    fclose(f);
+    if (!ok) return false;
+    out.w = w; out.h = h;
+    out.px.resize((size_t)w * h);
+    for (size_t i = 0; i < out.px.size(); i++)
+        out.px[i] = ((uint32_t)rgb[i * 3] << 16) | ((uint32_t)rgb[i * 3 + 1] << 8) | rgb[i * 3 + 2];
+    return true;
+}
+
+static void tile_cache_write(const std::string& path, const CatImage& im)
+{
+    if (path.empty() || !im.ok()) return;
+    mkdir("/data/ps4installer_app", 0777);
+    mkdir(CACHE_DIR, 0777);
+    std::vector<unsigned char> rgb(im.px.size() * 3);
+    for (size_t i = 0; i < im.px.size(); i++) {
+        rgb[i * 3] = (unsigned char)(im.px[i] >> 16); rgb[i * 3 + 1] = (unsigned char)(im.px[i] >> 8); rgb[i * 3 + 2] = (unsigned char)im.px[i];
+    }
+    std::string tmp = path + ".tmp";
+    FILE* f = fopen(tmp.c_str(), "wb");
+    if (!f) return;
+    bool ok = fwrite(rgb.data(), 1, rgb.size(), f) == rgb.size();
+    fclose(f);
+    if (ok) rename(tmp.c_str(), path.c_str()); else remove(tmp.c_str());
+}
+
+static void load_tile(const Game& g, CatImage& out)
+{
+    std::string p = tile_cache_path(g, TILE_W, IMG_H);
+    if (tile_cache_read(p, TILE_W, IMG_H, out)) return;
+    if (load_game_image(g, TILE_W, IMG_H, out)) tile_cache_write(p, out);
+}
+
 // За один проход грузим не больше одной картинки (чтобы кнопки не «залипали»). true - что-то загрузили.
 static bool tile_images_step()
 {
@@ -431,14 +499,19 @@ static bool tile_images_step()
         g_tileTried[(size_t)far] = 0;
         loaded--;
     }
+    // Грузим картинки видимых рядов, пока не истёк небольшой запас времени на кадр (кнопки не «залипают»):
+    // из кэша на диске успевает несколько штук за проход, разбор большого JPEG - обычно одна.
+    uint64_t t0 = sceKernelGetProcessTime();
+    bool any = false;
     int vFirst = g_topRow * COLS, vLast = (g_topRow + ROWS_VIS) * COLS;
     for (int i = vFirst; i < vLast && i < n; i++) {
         if (g_tileTried[(size_t)i]) continue;
         g_tileTried[(size_t)i] = 1;
-        load_game_image(g_games[(size_t)i], TILE_W, IMG_H, g_tileImg[(size_t)i]);
-        return true;
+        load_tile(g_games[(size_t)i], g_tileImg[(size_t)i]);
+        any = true;
+        if (sceKernelGetProcessTime() - t0 > 40000) break;
     }
-    return false;
+    return any;
 }
 
 static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage* img)
@@ -878,12 +951,12 @@ static void draw_all()
     }
 
     // Нижняя строка
-    const char* hint = "{L} / {R} - вкладки";
+    const char* hint = "";
     if (g_tab == TAB_INSTALLED && g_mode == MODE_GRID)
-        hint = "Стрелки / стик - выбор    {X} - открыть    {T} - удалить    {S} - обновить    {L} / {R} - вкладки";
+        hint = "{X} - открыть    {T} - удалить    {S} - обновить";
     else if (g_tab == TAB_AVAILABLE && g_mode == MODE_GRID)
-        hint = g_instActive ? "Стрелки / стик - выбор    {X} - в очередь    {T} - ход установки    {S} - обновить    {L} / {R} - вкладки"
-                            : "Стрелки / стик - выбор    {X} - установить    {S} - обновить    {L} / {R} - вкладки";
+        hint = g_instActive ? "{X} - в очередь    {T} - ход установки    {S} - обновить"
+                            : "{X} - установить    {S} - обновить";
     else if (g_mode != MODE_GRID) hint = "";
     draw_hint(hint, MARGIN_X, FRAME_HEIGHT - 40, C_DIM, C_BG);
     std::string ver = std::string("версия ") + APP_VERSION;
