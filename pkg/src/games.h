@@ -12,6 +12,7 @@ struct Game {
     int patches = 0, dlcs = 0, rus = 0;
     bool incomplete = false;      // хотя бы один файл докачан не до конца
     bool installed = false;       // уже стоит на консоли
+    bool listOnly = false;        // запись вкладки «Каталог игр»: игры нет ни на диске, ни на консоли
     bool console = false;         // запись вкладки «Установленные игры»: берётся с консоли, а не из PKG
     std::vector<PkgItem> files;   // все файлы этой игры (сама игра, патчи, DLC, русификаторы)
 };

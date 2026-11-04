@@ -34,6 +34,7 @@ extern "C" int sceSystemServiceHideSplashScreen(void);
 
 static const int TITLE_PX = 32;   // название игры в карточке (если не влезает - уменьшается, но не ниже TITLE_MIN_PX)
 static const int TITLE_MIN_PX = 16;
+static const int DESC_PX = 26;    // описание игры в карточке
 static const int FONT_PX  = 30;   // крупно, чтобы читалось с дивана; подберём по телевизору
 static const int MARGIN_X = 40;
 static const int HEAD_H   = 90;
@@ -126,7 +127,8 @@ static void fill(int x, int y, int w, int h, Color c) { g_scene->FillRect(x, y, 
 
 // ---- Значки кнопок геймпада. В тексте подсказок: {X} крест, {O} круг, {S} квадрат, {T} треугольник.
 static const int ICON_S = 38;
-static int icon_w(char kind) { return (kind == 'L' || kind == 'R') ? ICON_S * 2 : ICON_S; }   // плечевые кнопки шире
+static bool is_shoulder(char k) { return k == 'L' || k == 'R' || k == 'l' || k == 'r'; }   // L1 R1 (большие буквы) и L2 R2 (маленькие)
+static int icon_w(char kind) { return is_shoulder(kind) ? ICON_S * 2 : ICON_S; }   // плечевые кнопки шире
 
 // Попадает ли точка (fx, fy) внутрь рисунка значка (координаты в пикселях внутри квадрата ICON_S).
 static bool icon_sample(char kind, double fx, double fy)
@@ -165,12 +167,12 @@ static Color mix(Color a, Color b, int cov9)   // a - значок, b - фон; 
 
 // Готовые значки (pkg/assets/images/btn_*.png, их рисует tools/make_button_icons.py): гладкие края, прозрачность.
 struct IconPng { int w = 0, h = 0; std::vector<uint32_t> px; bool tried = false; };
-static IconPng g_iconPng[6];
+static IconPng g_iconPng[8];
 
 static IconPng* icon_png(char kind)
 {
-    static const char kinds[] = "XOSTLR";
-    static const char* names[] = { "cross", "circle", "square", "triangle", "l1", "r1" };
+    static const char kinds[] = "XOSTLRlr";
+    static const char* names[] = { "cross", "circle", "square", "triangle", "l1", "r1", "l2", "r2" };
     const char* p = strchr(kinds, kind);
     if (!p || !kind) return nullptr;
     int i = (int)(p - kinds);
@@ -192,7 +194,7 @@ static IconPng* icon_png(char kind)
 static void draw_pad_icon(char kind, int x, int top, Color bg = C_BG)
 {
     if (IconPng* ic = icon_png(kind)) {
-        int y0 = (kind == 'L' || kind == 'R') ? top + (ICON_S - ic->h) / 2 : top;
+        int y0 = is_shoulder(kind) ? top + (ICON_S - ic->h) / 2 : top;
         for (int yy = 0; yy < ic->h; yy++)
             for (int xx = 0; xx < ic->w; xx++) {
                 uint32_t v = ic->px[(size_t)yy * ic->w + xx];
@@ -206,7 +208,7 @@ static void draw_pad_icon(char kind, int x, int top, Color bg = C_BG)
             }
         return;
     }
-    bool shoulder = kind == 'L' || kind == 'R';
+    bool shoulder = is_shoulder(kind);
     Color col = kind == 'X' ? Color{ 110, 160, 255 } : kind == 'O' ? Color{ 255, 105, 105 } :
                 kind == 'S' ? Color{ 235, 135, 205 } : kind == 'T' ? Color{ 95, 215, 150 } : Color{ 175, 180, 200 };
     const int w = icon_w(kind), h = shoulder ? ICON_S - 10 : ICON_S, y0 = shoulder ? top + 5 : top;
@@ -226,7 +228,7 @@ static void draw_pad_icon(char kind, int x, int top, Color bg = C_BG)
     if (shoulder) {
         FT_Set_Pixel_Sizes(g_font, 0, 21);
         int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : 12;
-        draw_text(kind == 'L' ? "L1" : "R1", x + (w - 2 * cell) / 2, y0 + h - 7, col, bg);
+        draw_text(kind == 'L' ? "L1" : kind == 'R' ? "R1" : kind == 'l' ? "L2" : "R2", x + (w - 2 * cell) / 2, y0 + h - 7, col, bg);
         FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
     }
 }
@@ -289,7 +291,8 @@ struct ListState {
 };
 static ListState g_lists[TAB_COUNT];
 static int g_listTab = TAB_AVAILABLE;
-static bool g_installedStale = true;   // список установленных надо перечитать (первый раз, после установки)
+static bool g_installedStale = true;
+static bool g_catalogStale = true;     // список каталога надо собрать заново (первый раз, после установки/удаления)   // список установленных надо перечитать (первый раз, после установки)
 static bool g_preloaded = false;       // после первой загрузки доступных игр установленные подгружены в фоне
 
 static void switch_list(int newTab)
@@ -302,7 +305,7 @@ static void switch_list(int newTab)
     n.games.swap(g_games); n.img.swap(g_tileImg); n.tried.swap(g_tileTried);
     std::swap(n.cursor, g_cursor); std::swap(n.topRow, g_topRow); std::swap(n.load, g_load); n.err.swap(g_loadErr);
     g_listTab = newTab;
-    if (newTab == TAB_INSTALLED && g_installedStale) g_load = LS_NONE;   // перечитываем только если что-то могло измениться
+    if ((newTab == TAB_INSTALLED && g_installedStale) || (newTab == TAB_CATALOG && g_catalogStale)) g_load = LS_NONE;   // перечитываем только если что-то могло измениться
 }
 
 // Окна: подтверждение установки и ход установки.
@@ -349,7 +352,8 @@ static uint64_t pending_bytes()
 static uint64_t g_lastPoll = 0;
 static bool g_freshScan = false;           // Квадрат: просим у службы свежее сканирование
 static int g_cardReason = 0;               // 0 - можно ставить; иначе почему кнопка установки неактивна
-enum { CARD_OK = 0, CARD_INSTALLED, CARD_INCOMPLETE, CARD_QUEUED, CARD_LAUNCH };
+enum { CARD_OK = 0, CARD_INSTALLED, CARD_INCOMPLETE, CARD_QUEUED, CARD_LAUNCH, CARD_REQUEST };
+static bool g_confirmOk = false;          // сообщение под карточкой - не ошибка (рисуется зелёным)
 static bool g_skipConfirmInput = false;   // то же нажатие Креста, что открыло окно, не считается «Установить»
 
 static void mark_installed()
@@ -398,6 +402,7 @@ static void preload_installed()
     switch_list(TAB_AVAILABLE);
 }
 
+static void load_catalog_list();
 static std::string lower_ascii(std::string s)
 {
     for (size_t i = 0; i < s.size(); i++) if (s[i] >= 'A' && s[i] <= 'Z') s[i] = (char)(s[i] - 'A' + 'a');
@@ -427,6 +432,7 @@ static void load_installed()
         g.console = true;
         g_games.push_back(g);
     }
+    g_catalogStale = true;   // каталог (без установленных) собирается заново
     for (size_t a = 1; a < g_games.size(); a++)   // по алфавиту (латиница; остальное по коду символа)
         for (size_t b = a; b > 0 && lower_ascii(g_games[b].title) < lower_ascii(g_games[b - 1].title); b--) std::swap(g_games[b], g_games[b - 1]);
     g_tileImg.clear(); g_tileTried.clear();
@@ -436,6 +442,46 @@ static void load_installed()
     g_installedStale = false;
     g_loadErr.clear();
     logf_("ui: установленных игр: %d", (int)g_games.size());
+}
+
+// Вкладка «Каталог игр»: все игры базы, кроме уже установленных (их ищем и по Title ID, и по названию).
+static char letter_of(const std::string& t)
+{
+    if (t.empty()) return '#';
+    unsigned char c = (unsigned char)t[0];
+    if (c >= 'a' && c <= 'z') c = (unsigned char)(c - 32);
+    return (c >= 'A' && c <= 'Z') ? (char)c : '#';
+}
+
+static void load_catalog_list()
+{
+    std::vector<std::pair<std::string, std::string> > inst;
+    service_installed_games(inst);   // не вышло - ничего страшного, просто покажем все игры
+    std::vector<const CatEntry*> skip;
+    for (size_t i = 0; i < inst.size(); i++) {
+        const CatEntry* e = catalog_find(inst[i].first, inst[i].second);
+        if (e) skip.push_back(e);
+    }
+    g_games.clear();
+    int n = catalog_count();
+    for (int i = 0; i < n; i++) {
+        const CatEntry* e = catalog_at(i);
+        if (!e || e->name_en.empty()) continue;
+        if (std::find(skip.begin(), skip.end(), e) != skip.end()) continue;
+        Game g;
+        g.title = e->name_en;
+        g.title_id = e->title_id;
+        g.listOnly = true;
+        g_games.push_back(g);
+    }
+    std::sort(g_games.begin(), g_games.end(), [](const Game& a, const Game& b) { return lower_ascii(a.title) < lower_ascii(b.title); });
+    g_tileImg.clear(); g_tileTried.clear();
+    if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
+    g_topRow = 0;
+    g_load = LS_OK;
+    g_catalogStale = false;
+    g_loadErr.clear();
+    logf_("ui: игр в каталоге для показа: %d (из %d)", (int)g_games.size(), n);
 }
 
 // ---------------------------------------------------------------- рисование
@@ -561,7 +607,56 @@ static bool tile_images_step()
     return any;
 }
 
-static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage* img)
+// ---- Крутилка загрузки: 12 точек по кругу, самая яркая «бежит». Пока она на экране, кадр перерисовывается (анимация).
+static bool g_spinnerSeen = false;
+static uint64_t g_lastSpin = 0;
+
+static Color mixf(Color fg, Color bg, double t)
+{
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+    Color c;
+    c.r = (uint8_t)(bg.r + (fg.r - bg.r) * t);
+    c.g = (uint8_t)(bg.g + (fg.g - bg.g) * t);
+    c.b = (uint8_t)(bg.b + (fg.b - bg.b) * t);
+    return c;
+}
+
+static void draw_spinner(int cx, int cy, int radius, Color bg)
+{
+    g_spinnerSeen = true;
+    const int N = 12;
+    const double PI = 3.14159265358979;
+    int phase = (int)((sceKernelGetProcessTime() / 90000) % N);
+    double dotR = radius * 0.15, ringR = radius * 0.8;
+    Color fg = { 120, 165, 255 };
+    for (int k = 0; k < N; k++) {
+        double ang = 2 * PI * k / N - PI / 2;
+        double px = cx + cos(ang) * ringR, py = cy + sin(ang) * ringR;
+        int age = (phase - k + N) % N;                  // 0 - самая яркая точка, дальше тускнеют
+        double bright = 1.0 - age * 0.075 - (age > 0 ? 0.08 : 0);
+        for (int yy = (int)(py - dotR - 1); yy <= (int)(py + dotR + 1); yy++)
+            for (int xx = (int)(px - dotR - 1); xx <= (int)(px + dotR + 1); xx++) {
+                double d = sqrt((xx + 0.5 - px) * (xx + 0.5 - px) + (yy + 0.5 - py) * (yy + 0.5 - py));
+                double cov = dotR + 0.5 - d;            // гладкий край
+                if (cov <= 0) continue;
+                if (cov > 1) cov = 1;
+                if (xx < 0 || yy < 0 || xx >= FRAME_WIDTH || yy >= FRAME_HEIGHT) continue;
+                g_scene->PutPixel(xx, yy, mixf(fg, bg, bright * cov));
+            }
+    }
+}
+
+// Крутилка по центру области под шапкой, под ней надпись.
+static void draw_loading(const std::string& text, const std::string& sub = "")
+{
+    int cx = FRAME_WIDTH / 2, cy = (HEAD_H + FRAME_HEIGHT - 100) / 2 - 30;
+    draw_spinner(cx, cy, 55, C_BG);
+    draw_text(text, cx - text_w(text) / 2, cy + 55 + 60, C_TEXT, C_BG);
+    if (!sub.empty()) draw_text(sub, cx - text_w(sub) / 2, cy + 55 + 110, C_DIM, C_BG);
+}
+
+static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage* img, bool pending = false)
 {
     Color bg = selected ? C_TILE_SEL : C_TILE;
     if (selected) fill(x - 5, y - 5, TILE_W + 10, TILE_H + 10, C_TAB_ON);
@@ -574,6 +669,8 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
     fill(x, y, TILE_W, IMG_H, c);
     if (img && img->ok()) {
         blit(*img, x, y);
+    } else if (pending) {   // картинка ещё грузится
+        draw_spinner(x + TILE_W / 2, y + IMG_H / 2, 38, c);
     } else {
         std::string letter;
         const unsigned char* p = (const unsigned char*)g.title.c_str();
@@ -583,7 +680,7 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
     }
 
     // Размер игры в углу картинки
-    if (!g.console) {
+    if (!g.console && !g.listOnly) {
         std::string sz = fmt_size(g.size);
         int szw = text_w(sz) + 12;
         fill(x + TILE_W - szw, y + IMG_H - FONT_PX - 10, szw, FONT_PX + 10, C_BG);
@@ -591,7 +688,7 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
     }
 
     // Уже установлена: полоса поверх картинки
-    if (g.installed && !g.console) {
+    if (g.installed && !g.console && !g.listOnly) {
         std::string m = "УЖЕ УСТАНОВЛЕНО";
         int w = text_w(m) + 16;
         int mx = x + (TILE_W - w) / 2, my = y + IMG_H / 2 - (FONT_PX + 16) / 2;
@@ -618,7 +715,7 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
     if (g.patches) tags += "патч ";
     if (g.dlcs) tags += "DLC ";
     if (g.rus) tags += "рус ";
-    if (!tags.empty() && !g.console) {
+    if (!tags.empty() && !g.console && !g.listOnly) {
         int w = text_w(tags) + 12;
         fill(x, y, w, FONT_PX + 10, C_BG);
         draw_text(tags, x + 6, y + FONT_PX + 1, C_WARN, C_BG);
@@ -634,10 +731,9 @@ static void draw_service_message()
 {
     int y = GRID_TOP + 60;
     if (g_svc == SVC_CHECK) {
-        draw_text("Проверка службы установки...", MARGIN_X, y, C_TEXT, C_BG);
+        draw_loading("Проверка службы установки...");
     } else if (g_svc == SVC_STARTING) {
-        draw_text("Запуск службы установки...", MARGIN_X, y, C_TEXT, C_BG);
-        draw_text("Это занимает несколько секунд.", MARGIN_X, y + 50, C_DIM, C_BG);
+        draw_loading("Запуск службы установки...", "Это занимает несколько секунд.");
     } else if (g_svc == SVC_NO_LOADER) {
         draw_text("Не удалось запустить службу: загрузчик payload'ов выключен.", MARGIN_X, y, C_WARN, C_BG);
         draw_text("Включите в GoldHEN: Servers settings - Enable Payloader Server.", MARGIN_X, y + 50, C_TEXT, C_BG);
@@ -651,7 +747,7 @@ static void draw_service_message()
 static void draw_available()
 {
     if (g_load == LS_LOADING || g_load == LS_NONE) {
-        draw_text("Загрузка списка игр...", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
+        draw_loading("Загрузка списка игр...");
         return;
     }
     if (g_load == LS_ERROR) {
@@ -664,6 +760,8 @@ static void draw_available()
         if (g_tab == TAB_INSTALLED) {
             draw_text("Установленных игр не найдено.", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
             draw_hint("Нажмите {S}, чтобы обновить список.", MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
+        } else if (g_tab == TAB_CATALOG) {
+            draw_text("Каталог игр не найден или пуст.", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
         } else {
             draw_text("Игр не найдено.", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
             draw_hint("Подключите флешку или диск с играми и нажмите {S}.", MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
@@ -676,12 +774,16 @@ static void draw_available()
             int idx = (g_topRow + r) * COLS + c;
             if (idx >= (int)g_games.size()) break;
             draw_tile(MARGIN_X + c * (TILE_W + gapX), GRID_TOP + r * (TILE_H + GAP_Y), g_games[(size_t)idx], idx == g_cursor,
-                      (size_t)idx < g_tileImg.size() ? &g_tileImg[(size_t)idx] : nullptr);
+                      (size_t)idx < g_tileImg.size() ? &g_tileImg[(size_t)idx] : nullptr,
+                      (size_t)idx >= g_tileTried.size() || !g_tileTried[(size_t)idx]);
         }
     }
     int rows = ((int)g_games.size() + COLS - 1) / COLS;
     char pg[96];
-    snprintf(pg, sizeof(pg), "Игра %d из %d   ряд %d из %d", g_cursor + 1, (int)g_games.size(), g_cursor / COLS + 1, rows);
+    if (g_tab == TAB_CATALOG)
+        snprintf(pg, sizeof(pg), "Игра %d из %d   буква %c   ряд %d из %d", g_cursor + 1, (int)g_games.size(), letter_of(g_games[(size_t)g_cursor].title), g_cursor / COLS + 1, rows);
+    else
+        snprintf(pg, sizeof(pg), "Игра %d из %d   ряд %d из %d", g_cursor + 1, (int)g_games.size(), g_cursor / COLS + 1, rows);
     draw_text(pg, MARGIN_X, FRAME_HEIGHT - 90, C_DIM, C_BG);
 }
 
@@ -799,15 +901,20 @@ static void draw_info_top(const Game& g, int x, int y, int W)
         if (g_imgShots[i].ok()) blit(g_imgShots[i], sx, sy);
         else if (g_selCat) fill(sx, sy, SHOT_W, SHOT_H, C_TILE);
     }
-    int dy = sy + SHOT_H + 14 + FONT_PX;
-    std::vector<std::string> d = wrap_lines(g_selDesc, maxc, 3);
-    for (size_t i = 0; i < d.size(); i++) draw_text(d[i], rx, dy + (int)i * (FONT_PX + 6), C_TEXT, C_PANEL);
+    // Описание мельче основного текста (26 вместо 30), влезает больше строк.
+    FT_Set_Pixel_Sizes(g_font, 0, DESC_PX);
+    int dcell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : g_cellW * DESC_PX / FONT_PX;
+    if (dcell < 1) dcell = 1;
+    int dy = sy + SHOT_H + 14 + DESC_PX;
+    std::vector<std::string> d = wrap_lines(g_selDesc, rw / dcell, 4);
+    for (size_t i = 0; i < d.size(); i++) draw_text(d[i], rx, dy + (int)i * (DESC_PX + 6), C_TEXT, C_PANEL);
+    FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
 }
 
 static void draw_confirm()
 {
     const int W = 1500;   // 30 + обложка 350 + 30 + 4 скриншота с промежутками (4*254+3*14) + 30 = 1478
-    const int H = g_cardReason == CARD_LAUNCH ? 520 : 590;
+    const int H = (g_cardReason == CARD_LAUNCH || g_cardReason == CARD_REQUEST) ? 520 : 590;
     // по центру между шапкой и нижней строкой подсказок
     int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + (FRAME_HEIGHT - 100 - HEAD_H - H) / 2;
     draw_panel(x, y, W, H);
@@ -818,6 +925,13 @@ static void draw_confirm()
     if (g_cardReason == CARD_LAUNCH) {   // окно установленной игры: только запуск
         if (!g_confirmErr.empty()) draw_text(fit_chars(g_confirmErr, maxc), tx, y + H - 130 + 36, C_WARN, C_PANEL);
         std::string h = "{X} - запустить игру      {T} - удалить      {O} - закрыть";
+        draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
+        return;
+    }
+
+    if (g_cardReason == CARD_REQUEST) {   // игра из каталога: запросить
+        if (!g_confirmErr.empty()) draw_text(fit_chars(g_confirmErr, maxc), tx, y + H - 130 + 36, g_confirmOk ? C_GREEN : C_WARN, C_PANEL);
+        std::string h = "{X} - запросить      {O} - закрыть";
         draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
         return;
     }
@@ -954,6 +1068,7 @@ static void draw_progress()
 
 static void draw_all()
 {
+    g_spinnerSeen = false;
     fill(0, 0, FRAME_WIDTH, FRAME_HEIGHT, C_BG);
     fill(0, 0, FRAME_WIDTH, HEAD_H, C_HEAD);
 
@@ -979,7 +1094,7 @@ static void draw_all()
 
     if (g_svc != SVC_OK) {
         draw_service_message();
-    } else if (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED) {
+    } else if (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED || g_tab == TAB_CATALOG) {
         draw_available();
     } else {
         std::string body = std::string("Здесь будет вкладка «") + TAB_NAMES[g_tab] + "»";
@@ -1001,6 +1116,8 @@ static void draw_all()
     const char* hint = "";
     if (g_tab == TAB_INSTALLED && g_mode == MODE_GRID)
         hint = "{X} - открыть    {T} - удалить    {S} - обновить";
+    else if (g_tab == TAB_CATALOG && g_mode == MODE_GRID)
+        hint = "{X} - информация    {l} / {r} - по буквам    {S} - обновить";
     else if (g_tab == TAB_AVAILABLE && g_mode == MODE_GRID)
         hint = g_instActive ? "{X} - в очередь    {T} - ход установки    {S} - обновить"
                             : "{X} - установить    {S} - обновить";
@@ -1080,6 +1197,52 @@ static void cursor_move(int dx, int dy)
     }
 }
 
+// Перескок к началу следующей (dir > 0) или предыдущей буквы алфавита (вкладка «Каталог игр»).
+static void jump_letter(int dir)
+{
+    int n = (int)g_games.size();
+    if (n == 0) return;
+    int i = g_cursor;
+    char cur = letter_of(g_games[(size_t)i].title);
+    if (dir > 0) {
+        while (i < n && letter_of(g_games[(size_t)i].title) == cur) i++;
+        if (i >= n) return;
+    } else {
+        while (i > 0 && letter_of(g_games[(size_t)i - 1].title) == cur) i--;
+        if (i == g_cursor) {   // уже в начале буквы: идём к началу предыдущей
+            if (i == 0) return;
+            char prev = letter_of(g_games[(size_t)i - 1].title);
+            while (i > 0 && letter_of(g_games[(size_t)i - 1].title) == prev) i--;
+        }
+    }
+    g_cursor = i;
+    g_topRow = i / COLS;   // строка с началом буквы - сверху
+    int rows = (n + COLS - 1) / COLS;
+    if (g_topRow > rows - ROWS_VIS) g_topRow = rows > ROWS_VIS ? rows - ROWS_VIS : 0;
+    g_redraw = 2;
+}
+
+// Запрос игры: пока просто записываем в /data/ps4installer_app/requests.txt (Title ID и название), без повторов.
+static bool request_game(const Game& g, std::string& msg)
+{
+    const char* path = "/data/ps4installer_app/requests.txt";
+    std::string line = g.title_id + "\t" + g.title;
+    std::string all;
+    if (FILE* f = fopen(path, "rb")) {
+        char buf[4096]; size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) all.append(buf, n);
+        fclose(f);
+    }
+    if (all.find(line + "\n") != std::string::npos) { msg = "Уже запрошено ранее"; return true; }
+    mkdir("/data/ps4installer_app", 0777);
+    FILE* f = fopen(path, "ab");
+    if (!f) { msg = "Не удалось записать запрос"; return false; }
+    fputs((line + "\n").c_str(), f);
+    fclose(f);
+    msg = "Запрос записан";
+    return true;
+}
+
 void ui_pump()
 {
     if (!g_ready) return;
@@ -1116,6 +1279,7 @@ void ui_pump()
                 g_instFinished = true;
                 mark_installed();
                 g_installedStale = true;
+                g_catalogStale = true;
                 logf_("ui: установка завершена (%d файлов)", (int)st.jobs.size());
             }
             g_redraw = 2;
@@ -1128,7 +1292,7 @@ void ui_pump()
         g_svcDrawn = false;
         g_redraw = 2;
     }
-    if (g_svc == SVC_OK && (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED)) {
+    if (g_svc == SVC_OK && (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED || g_tab == TAB_CATALOG)) {
         bool isAvail = g_tab == TAB_AVAILABLE;
         bool wantLoad = (isAvail ? first : g_load == LS_NONE) || (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_SQUARE));
         if (wantLoad && g_load != LS_LOADING) {
@@ -1151,7 +1315,19 @@ void ui_pump()
                 g_mode = MODE_PROGRESS;
                 g_redraw = 2;
             }
-            if (g_mode == MODE_GRID && g_tab == TAB_INSTALLED && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
+            if (g_mode == MODE_GRID && g_tab == TAB_CATALOG && (pressed & ORBIS_PAD_BUTTON_L2)) jump_letter(-1);
+            if (g_mode == MODE_GRID && g_tab == TAB_CATALOG && (pressed & ORBIS_PAD_BUTTON_R2)) jump_letter(1);
+            if (g_mode == MODE_GRID && g_tab == TAB_CATALOG && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
+                g_sel = g_games[(size_t)g_cursor];
+                g_cardReason = CARD_REQUEST;
+                g_confirmErr.clear();
+                g_confirmOk = false;
+                info_load(g_sel);
+                g_mode = MODE_CONFIRM;
+                g_skipConfirmInput = true;
+                logf_("ui: информация об игре из каталога: %s (%s)", g_sel.title.c_str(), g_sel.title_id.c_str());
+                g_redraw = 2;
+            } else if (g_mode == MODE_GRID && g_tab == TAB_INSTALLED && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
                 g_sel = g_games[(size_t)g_cursor];
                 g_cardReason = CARD_LAUNCH;
                 g_confirmErr.clear();
@@ -1196,6 +1372,11 @@ void ui_pump()
             g_deleteErr.clear();
             g_deleteFrom = MODE_CONFIRM;
             g_mode = MODE_DELETE;
+            g_redraw = 2;
+        }
+        else if ((cp & ORBIS_PAD_BUTTON_CROSS) && g_cardReason == CARD_REQUEST) {
+            g_confirmOk = request_game(g_sel, g_confirmErr);
+            logf_("ui: запрос игры %s: %s", g_sel.title_id.c_str(), g_confirmErr.c_str());
             g_redraw = 2;
         }
         else if ((cp & ORBIS_PAD_BUTTON_CROSS) && g_cardReason == CARD_LAUNCH) {
@@ -1254,7 +1435,7 @@ void ui_pump()
         }
     }
 
-    if (g_redraw == 0 && g_svc == SVC_OK && (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED) && g_mode == MODE_GRID && g_load == LS_OK &&
+    if (g_redraw == 0 && g_svc == SVC_OK && (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED || g_tab == TAB_CATALOG) && g_mode == MODE_GRID && g_load == LS_OK &&
         tile_images_step())
         g_redraw = 2;
     else if (g_redraw == 0 && g_svc == SVC_OK && g_tab == TAB_AVAILABLE && g_mode == MODE_GRID && g_load == LS_OK &&
@@ -1264,8 +1445,11 @@ void ui_pump()
         switch_list(TAB_AVAILABLE);
     }
 
+    // Крутилка на экране: перерисовываем примерно каждые 90 мс, чтобы она вращалась.
+    if (g_spinnerSeen && g_redraw == 0 && now - g_lastSpin >= 90000) g_redraw = 1;
     bool drew = false;
     if (g_redraw > 0) {
+        g_lastSpin = now;
         draw_all();
         g_scene->SubmitFlip(g_frameID);
         g_scene->FrameWait(g_frameID);
@@ -1319,6 +1503,7 @@ void ui_pump()
     // Загрузка списка: сначала на экране показывается «Загрузка...», потом (после показа кадра) идёт запрос.
     if (drew && g_load == LS_LOADING && g_redraw == 1) {
         if (g_tab == TAB_INSTALLED) load_installed();
+        else if (g_tab == TAB_CATALOG) load_catalog_list();
         else {
             load_games(g_freshScan);
             if (!g_preloaded && g_load == LS_OK) {

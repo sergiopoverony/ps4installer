@@ -60,6 +60,8 @@ def main():
         ring_icon(kind).save(OUT / ("btn_%s.png" % kind), optimize=True)
     shoulder_icon("L1").save(OUT / "btn_l1.png", optimize=True)
     shoulder_icon("R1").save(OUT / "btn_r1.png", optimize=True)
+    shoulder_icon("L2").save(OUT / "btn_l2.png", optimize=True)
+    shoulder_icon("R2").save(OUT / "btn_r2.png", optimize=True)
     print("Готово:", ", ".join(sorted(p.name for p in OUT.glob("btn_*.png"))))
 
 
