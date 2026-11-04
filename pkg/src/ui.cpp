@@ -20,7 +20,7 @@
 
 #include <orbis/Pad.h>
 #include <orbis/UserService.h>
-#include <orbis/libkernel.h>
+#include <pthread.h>
 
 extern "C" uint64_t sceKernelGetProcessTime(void);
 extern "C" int sceSystemServiceHideSplashScreen(void);
@@ -1873,8 +1873,9 @@ void ui_pump()
     // а главный поток тем временем крутит крутилку.
     if (drew && g_load == LS_LOADING && g_redraw == 1 && !g_workerBusy) {
         g_workerBusy = true;
-        ScePthread th;
-        if (scePthreadCreate(&th, nullptr, load_worker, nullptr, "ps4i_load") != 0) {   // поток не создался: грузим здесь, как раньше
+        pthread_t th;
+        if (pthread_create(&th, nullptr, load_worker, nullptr) == 0) pthread_detach(th);
+        else {   // поток не создался: грузим здесь, как раньше
             logf_("ui: поток загрузки не создан, грузим в главном потоке");
             load_worker(nullptr);
         }
