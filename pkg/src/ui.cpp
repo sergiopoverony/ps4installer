@@ -193,20 +193,24 @@ static IconPng* icon_png(char kind)
     return ic.w > 0 ? &ic : nullptr;
 }
 
-// Логотип магазина (pkg/assets/images/logo.png) в левом углу шапки.
-static void draw_logo(int x, int y, Color bg)
+// Загрузка PNG с диска приложения в IconPng (один раз).
+static IconPng* load_png_asset(IconPng& ic, const char* path)
 {
-    IconPng& ic = g_logoPng;
     if (!ic.tried) {
         ic.tried = true;
         std::string blob;
-        if (FILE* f = fopen("/app0/assets/images/logo.png", "rb")) {
+        if (FILE* f = fopen(path, "rb")) {
             char buf[4096]; size_t n;
             while ((n = fread(buf, 1, sizeof(buf), f)) > 0) blob.append(buf, n);
             fclose(f);
         }
-        if (blob.empty() || !catalog_decode_rgba(blob, ic.w, ic.h, ic.px)) { ic.w = ic.h = 0; ic.px.clear(); logf_("ui: нет логотипа"); }
+        if (blob.empty() || !catalog_decode_rgba(blob, ic.w, ic.h, ic.px)) { ic.w = ic.h = 0; ic.px.clear(); logf_("ui: нет картинки %s", path); }
     }
+    return ic.w > 0 ? &ic : nullptr;
+}
+
+static void blit_png(const IconPng& ic, int x, int y, Color bg)
+{
     for (int yy = 0; yy < ic.h; yy++)
         for (int xx = 0; xx < ic.w; xx++) {
             uint32_t v = ic.px[(size_t)yy * ic.w + xx];
@@ -218,6 +222,20 @@ static void draw_logo(int x, int y, Color bg)
             c.b = (uint8_t)(((v & 255) * a + bg.b * (255 - a)) / 255);
             g_scene->PutPixel(x + xx, y + yy, c);
         }
+}
+
+// Логотип магазина (pkg/assets/images/logo.png) в левом углу шапки.
+static void draw_logo(int x, int y, Color bg)
+{
+    if (load_png_asset(g_logoPng, "/app0/assets/images/logo.png")) blit_png(g_logoPng, x, y, bg);
+}
+
+// Значки пометок на плитке: 0 - русификатор, 1 - патч, 2 - DLC.
+static IconPng g_tagPng[3];
+static IconPng* tag_png(int k)
+{
+    static const char* paths[] = { "/app0/assets/images/tag_rus.png", "/app0/assets/images/tag_patch.png", "/app0/assets/images/tag_dlc.png" };
+    return load_png_asset(g_tagPng[k], paths[k]);
 }
 
 static void draw_pad_icon(char kind, int x, int top, Color bg = C_BG)
@@ -869,35 +887,43 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
         draw_text(letter, x + (TILE_W - g_cellW) / 2, y + IMG_H / 2 + FONT_PX / 3, C_TEXT, c);
     }
 
-    // Нижняя полоса картинки: статус (на всю ширину) или, если статуса нет, размер игры в правом углу.
+    // Нижняя полоса картинки: размер игры справа в углу (есть всегда) и, если есть, статус слева от него.
     {
         const char* m = nullptr;
         Color sbg = C_GREEN, sfg = C_BG;
-        if (g.installed && !g.console && !g.listOnly) m = "УЖЕ УСТАНОВЛЕНО";
+        if (g.installed && !g.console && !g.listOnly) m = "УСТАНОВЛЕНО";
         else if (g.incomplete && !g.installed) { m = "НЕ ДОКАЧАНО"; sbg = C_RED_BG; sfg = C_TEXT; }
         else if (!g.installed && game_queued(g)) { m = "В ОЧЕРЕДИ"; sbg = C_WARN; sfg = C_BG; }
-        int sy = y + IMG_H - FONT_PX - 10;
-        if (m) {
-            std::string ms = m;
-            fill(x, sy, TILE_W, FONT_PX + 10, sbg);
-            draw_text(ms, x + (TILE_W - text_w(ms)) / 2, y + IMG_H - 9, sfg, sbg);
-        } else if (!g.console && !g.listOnly) {
+        const int bh = FONT_PX + 10, sy = y + IMG_H - bh;
+        int szw = 0;
+        if (!g.console && !g.listOnly) {
             std::string sz = fmt_size(g.size);
-            int szw = text_w(sz) + 12;
-            fill(x + TILE_W - szw, sy, szw, FONT_PX + 10, C_BG);
+            szw = text_w(sz) + 12;
+            fill(x + TILE_W - szw, sy, szw, bh, C_BG);
             draw_text(sz, x + TILE_W - szw + 6, y + IMG_H - 9, C_DIM, C_BG);
+        }
+        if (m) {   // статус мельче (24 px), чтобы поместился рядом с размером
+            FT_Set_Pixel_Sizes(g_font, 0, 24);
+            int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : 14;
+            int sw = TILE_W - szw;
+            std::string ms = fit_chars(m, (sw - 8) / cell);
+            fill(x, sy, sw, bh, sbg);
+            draw_text(ms, x + (sw - count_cp(ms) * cell) / 2, y + IMG_H - 13, sfg, sbg);
+            FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
         }
     }
 
-    // Пометки: патч / DLC / русификатор
-    std::string tags;
-    if (g.patches) tags += "патч ";
-    if (g.dlcs) tags += "DLC ";
-    if (g.rus) tags += "рус ";
-    if (!tags.empty() && !g.console && !g.listOnly) {
-        int w = text_w(tags) + 12;
-        fill(x, y, w, FONT_PX + 10, C_BG);
-        draw_text(tags, x + 6, y + FONT_PX + 1, C_WARN, C_BG);
+    // Пометки значками в левом верхнем углу: русификатор, патч, DLC
+    if (!g.console && !g.listOnly) {
+        int tx = x + 6;
+        const bool has[3] = { g.rus != 0, g.patches != 0, g.dlcs != 0 };
+        for (int k = 0; k < 3; k++) {
+            if (!has[k]) continue;
+            IconPng* ic = tag_png(k);
+            if (!ic) continue;
+            blit_png(*ic, tx, y + 6, C_BG);
+            tx += ic->w + 4;
+        }
     }
 
     int maxc = (TILE_W - 16) / g_cellW;
