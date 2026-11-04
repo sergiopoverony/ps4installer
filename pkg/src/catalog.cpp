@@ -170,6 +170,18 @@ bool catalog_image(const CatRef& ref, int w, int h, CatImage& out)
     return catalog_image_from_blob(blob, w, h, out);
 }
 
+bool catalog_decode_rgba(const std::string& blob, int& w, int& h, std::vector<uint32_t>& argb)
+{
+    int comp = 0;
+    unsigned char* src = stbi_load_from_memory((const unsigned char*)blob.data(), (int)blob.size(), &w, &h, &comp, 4);
+    if (!src || w <= 0 || h <= 0) { if (src) stbi_image_free(src); return false; }
+    argb.resize((size_t)w * h);
+    for (size_t i = 0; i < argb.size(); i++)
+        argb[i] = ((uint32_t)src[i * 4 + 3] << 24) | ((uint32_t)src[i * 4] << 16) | ((uint32_t)src[i * 4 + 1] << 8) | src[i * 4 + 2];
+    stbi_image_free(src);
+    return true;
+}
+
 bool catalog_image_from_blob(const std::string& blob, int w, int h, CatImage& out)
 {
     out = CatImage();

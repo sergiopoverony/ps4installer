@@ -210,9 +210,9 @@ class PipelineTests(unittest.TestCase):
         off, ln = g0["d"]
         self.assertEqual(pak[off:off + ln].decode("utf-8"), "Описание 0")
         off, ln = g0["c"]
-        self.assertEqual(Image.open(io.BytesIO(pak[off:off + ln])).size, (600, 600))  # оригинал 600x600 не увеличиваем
+        self.assertEqual(Image.open(io.BytesIO(pak[off:off + ln])).size, (350, 350))  # при упаковке обложка сжимается до размера карточки
         off, ln = g0["s"][0]
-        self.assertEqual(Image.open(io.BytesIO(pak[off:off + ln])).size, (480, 270))
+        self.assertEqual(Image.open(io.BytesIO(pak[off:off + ln])).size, (254, 143))
         # смещения идут подряд без дыр и перекрытий
         refs = []
         for g in doc["games"]:

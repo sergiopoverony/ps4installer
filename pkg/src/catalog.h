@@ -35,4 +35,6 @@ struct CatImage {
 };
 bool catalog_image(const CatRef& ref, int w, int h, CatImage& out);
 // То же для картинки (JPEG или PNG), уже лежащей в памяти (например, иконка из PKG).
+// Картинка с прозрачностью (PNG) как есть, без масштабирования. Пиксели 0xAARRGGBB.
+bool catalog_decode_rgba(const std::string& blob, int& w, int& h, std::vector<uint32_t>& argb);
 bool catalog_image_from_blob(const std::string& blob, int w, int h, CatImage& out);

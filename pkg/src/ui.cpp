@@ -163,8 +163,49 @@ static Color mix(Color a, Color b, int cov9)   // a - значок, b - фон; 
     return c;
 }
 
+// Готовые значки (pkg/assets/images/btn_*.png, их рисует tools/make_button_icons.py): гладкие края, прозрачность.
+struct IconPng { int w = 0, h = 0; std::vector<uint32_t> px; bool tried = false; };
+static IconPng g_iconPng[6];
+
+static IconPng* icon_png(char kind)
+{
+    static const char kinds[] = "XOSTLR";
+    static const char* names[] = { "cross", "circle", "square", "triangle", "l1", "r1" };
+    const char* p = strchr(kinds, kind);
+    if (!p || !kind) return nullptr;
+    int i = (int)(p - kinds);
+    IconPng& ic = g_iconPng[i];
+    if (!ic.tried) {
+        ic.tried = true;
+        std::string path = std::string("/app0/assets/images/btn_") + names[i] + ".png", blob;
+        FILE* f = fopen(path.c_str(), "rb");
+        if (f) {
+            char buf[4096]; size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0) blob.append(buf, n);
+            fclose(f);
+        }
+        if (blob.empty() || !catalog_decode_rgba(blob, ic.w, ic.h, ic.px)) { ic.w = ic.h = 0; ic.px.clear(); logf_("ui: нет значка %s", path.c_str()); }
+    }
+    return ic.w > 0 ? &ic : nullptr;
+}
+
 static void draw_pad_icon(char kind, int x, int top, Color bg = C_BG)
 {
+    if (IconPng* ic = icon_png(kind)) {
+        int y0 = (kind == 'L' || kind == 'R') ? top + (ICON_S - ic->h) / 2 : top;
+        for (int yy = 0; yy < ic->h; yy++)
+            for (int xx = 0; xx < ic->w; xx++) {
+                uint32_t v = ic->px[(size_t)yy * ic->w + xx];
+                unsigned a = v >> 24;
+                if (!a) continue;
+                Color c;
+                c.r = (uint8_t)((((v >> 16) & 255) * a + bg.r * (255 - a)) / 255);
+                c.g = (uint8_t)((((v >> 8) & 255) * a + bg.g * (255 - a)) / 255);
+                c.b = (uint8_t)(((v & 255) * a + bg.b * (255 - a)) / 255);
+                g_scene->PutPixel(x + xx, y0 + yy, c);
+            }
+        return;
+    }
     bool shoulder = kind == 'L' || kind == 'R';
     Color col = kind == 'X' ? Color{ 110, 160, 255 } : kind == 'O' ? Color{ 255, 105, 105 } :
                 kind == 'S' ? Color{ 235, 135, 205 } : kind == 'T' ? Color{ 95, 215, 150 } : Color{ 175, 180, 200 };
@@ -471,9 +512,15 @@ static void tile_cache_write(const std::string& path, const CatImage& im)
 
 static void load_tile(const Game& g, CatImage& out)
 {
+    static int logged = 0;   // время загрузки: в журнал попадают только первые плитки
+    uint64_t t0 = sceKernelGetProcessTime();
     std::string p = tile_cache_path(g, TILE_W, IMG_H);
-    if (tile_cache_read(p, TILE_W, IMG_H, out)) return;
+    if (tile_cache_read(p, TILE_W, IMG_H, out)) {
+        if (logged++ < 40) logf_("ui: плитка %s из кэша за %d мс", g.title_id.c_str(), (int)((sceKernelGetProcessTime() - t0) / 1000));
+        return;
+    }
     if (load_game_image(g, TILE_W, IMG_H, out)) tile_cache_write(p, out);
+    if (logged++ < 40) logf_("ui: плитка %s загружена за %d мс (с записью в кэш)", g.title_id.c_str(), (int)((sceKernelGetProcessTime() - t0) / 1000));
 }
 
 // За один проход грузим не больше одной картинки (чтобы кнопки не «залипали»). true - что-то загрузили.
@@ -958,7 +1005,7 @@ static void draw_all()
         hint = g_instActive ? "{X} - в очередь    {T} - ход установки    {S} - обновить"
                             : "{X} - установить    {S} - обновить";
     else if (g_mode != MODE_GRID) hint = "";
-    draw_hint(hint, MARGIN_X, FRAME_HEIGHT - 40, C_DIM, C_BG);
+    draw_hint(hint, (FRAME_WIDTH - hint_w(hint)) / 2, FRAME_HEIGHT - 40, C_DIM, C_BG);
     std::string ver = std::string("версия ") + APP_VERSION;
     draw_text(ver, FRAME_WIDTH - MARGIN_X - text_w(ver), FRAME_HEIGHT - 90, C_DIM, C_BG);
 }

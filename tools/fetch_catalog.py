@@ -60,6 +60,14 @@ DESC_MAX = 1500
 COVER_FETCH_W = 800
 SHOT_FETCH_W = 800
 
+# Размеры, под которые картинки сжимаются при упаковке (приложение показывает их ровно в таком виде, поэтому
+# на консоли декодируется маленький JPEG). Должны совпадать с pkg/src/ui.cpp: COVER_W/COVER_H и SHOT_W/SHOT_H;
+# плитка в сетке (340x340) делается из обложки 350x350 простым уменьшением. Поменяли вёрстку - пересоберите pak
+# (python3 tools/fetch_catalog.py --catalog data/ps4_catalog.json --pack-only), сеть не нужна.
+PACK_COVER = (350, 350)
+PACK_SHOT = (254, 143)
+PACK_QUALITY = 85
+
 PAK_MAGIC = b"PS4CATPK"
 PAK_VERSION = 1
 PAK_HEADER = 16  # magic(8) + version(u32) + reserved(u32)
@@ -410,6 +418,38 @@ def process_image(data, size, quality):
     return out.getvalue()
 
 
+def fit_jpeg(data, size, quality=PACK_QUALITY):
+    """Масштабирует с обрезкой по центру до ровно size и сохраняет обычным (не прогрессивным, 4:2:0) JPEG:
+    такой быстрее всего разбирается на консоли. Если Pillow нет или картинка не читается, отдаёт как есть."""
+    if Image is None:
+        return data
+    try:
+        im = Image.open(io.BytesIO(data))
+        im.load()
+        im = im.convert("RGB")
+        w, h = size
+        scale = max(w / im.width, h / im.height)
+        nw, nh = max(w, int(round(im.width * scale))), max(h, int(round(im.height * scale)))
+        im = im.resize((nw, nh), Image.Resampling.LANCZOS)
+        left, top = (nw - w) // 2, (nh - h) // 2
+        im = im.crop((left, top, left + w, top + h))
+        out = io.BytesIO()
+        im.save(out, "JPEG", quality=quality, optimize=True, progressive=False, subsampling=2)
+        return out.getvalue()
+    except Exception:
+        return data
+
+
+def _convert_game_images(d):
+    cover = fit_jpeg((d / "cover.jpg").read_bytes(), PACK_COVER)
+    shots = []
+    for i in range(1, MAX_SHOTS + 1):
+        sp = d / ("s%d.jpg" % i)
+        if sp.exists():
+            shots.append(fit_jpeg(sp.read_bytes(), PACK_SHOT))
+    return cover, shots
+
+
 def fetch_image(url, size, quality, fetch_w, delay):
     """Сначала пробуем уменьшенную версию с CDN. Если CDN ответил ошибкой, битой картинкой или
     слишком маленькой миниатюрой (меньше 80% нужной ширины), качаем оригинал."""
@@ -683,6 +723,7 @@ def pack(games, cache_dir, out_dir, log=print, keep_online=False, keep_ids=()):
             pos += len(blob)
             return ref
 
+        selected = []   # (игра, папка кэша, meta)
         for g in games:
             d = cache_dir / g["id"]
             mp = d / "meta.json"
@@ -696,23 +737,28 @@ def pack(games, cache_dir, out_dir, log=print, keep_online=False, keep_ids=()):
             if not keep_online and g["id"] not in keep_ids and needs_online(meta.get("notice")):
                 removed.append("%s  %s" % (g["id"], g["name"]))
                 continue
-            entry = {"id": g["id"], "cid": g.get("cid_out", g["cid"]), "n": g["name"]}
-            if meta.get("name_ru"):
-                entry["r"] = meta["name_ru"]
-            entry["c"] = put((d / "cover.jpg").read_bytes())
-            dp = d / "desc_ru.txt"  # перевод на русский (tools/translate_catalog.py), если есть
-            if not (dp.exists() and dp.stat().st_size):
-                dp = d / "desc.txt"
-            if dp.exists() and dp.stat().st_size:
-                entry["d"] = put(dp.read_bytes())
-            shots = []
-            for i in range(1, MAX_SHOTS + 1):
-                sp = d / ("s%d.jpg" % i)
-                if sp.exists():
-                    shots.append(put(sp.read_bytes()))
-            if shots:
-                entry["s"] = shots
-            index.append(entry)
+            selected.append((g, d, meta))
+
+        # Сжатие картинок - самая долгая часть: идёт в несколько потоков, результаты берутся по порядку.
+        log("Сжимаю картинки под размеры экрана (%d игр)..." % len(selected))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+            converted = pool.map(lambda t: _convert_game_images(t[1]), selected)
+            for n, ((g, d, meta), (cover, shots_data)) in enumerate(zip(selected, converted), 1):
+                if n % 500 == 0:
+                    log("  %d / %d" % (n, len(selected)))
+                entry = {"id": g["id"], "cid": g.get("cid_out", g["cid"]), "n": g["name"]}
+                if meta.get("name_ru"):
+                    entry["r"] = meta["name_ru"]
+                entry["c"] = put(cover)
+                dp = d / "desc_ru.txt"  # перевод на русский (tools/translate_catalog.py), если есть
+                if not (dp.exists() and dp.stat().st_size):
+                    dp = d / "desc.txt"
+                if dp.exists() and dp.stat().st_size:
+                    entry["d"] = put(dp.read_bytes())
+                shots = [put(b) for b in shots_data]
+                if shots:
+                    entry["s"] = shots
+                index.append(entry)
     pak_tmp.replace(out_dir / "catalog.pak")
     doc = {"version": PAK_VERSION, "count": len(index), "games": index}
     (out_dir / "catalog.json").write_text(json.dumps(doc, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
