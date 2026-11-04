@@ -1325,7 +1325,7 @@ static void draw_progress()
             if (g_inst.jobs[i].status == "failed") { m = g_inst.jobs[i].message; break; }
         draw_text(fit_chars("Ошибка: " + m, maxc), tx, by + 36, C_WARN, C_PANEL);
     } else if (g_instFinished) {
-        draw_text("Готово! Игра установлена, ищите её на главном экране консоли.", tx, by + 36, C_GREEN, C_PANEL);
+        draw_text("Готово! Установка завершена.", tx, by + 36, C_GREEN, C_PANEL);
     }
     std::string hint = g_instFinished ? "{O} - закрыть" : "{O} - скрыть окно (установка продолжится)";
     draw_hint(hint, x + (W - hint_w(hint)) / 2, y + H - 36, C_TEXT, C_PANEL);
