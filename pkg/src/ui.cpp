@@ -46,7 +46,6 @@ static const Color C_TEXT   = { 230, 230, 230 };
 static const Color C_DIM    = { 150, 155, 165 };
 static const Color C_TAB_ON = { 70, 110, 200 };
 static const Color C_TAB_OFF = { 44, 49, 62 };
-static const Color C_LOGO   = { 60,  66,  84 };
 static const Color C_TILE   = { 34,  38,  48 };
 static const Color C_TILE_SEL = { 52, 60,  82 };
 static const Color C_WARN   = { 235, 180,  80 };
@@ -170,6 +169,7 @@ static Color mix(Color a, Color b, int cov9)   // a - значок, b - фон; 
 // Готовые значки (pkg/assets/images/btn_*.png, их рисует tools/make_button_icons.py): гладкие края, прозрачность.
 struct IconPng { int w = 0, h = 0; std::vector<uint32_t> px; bool tried = false; };
 static IconPng g_iconPng[8];
+static IconPng g_logoPng;
 
 static IconPng* icon_png(char kind)
 {
@@ -191,6 +191,33 @@ static IconPng* icon_png(char kind)
         if (blob.empty() || !catalog_decode_rgba(blob, ic.w, ic.h, ic.px)) { ic.w = ic.h = 0; ic.px.clear(); logf_("ui: нет значка %s", path.c_str()); }
     }
     return ic.w > 0 ? &ic : nullptr;
+}
+
+// Логотип магазина (pkg/assets/images/logo.png) в левом углу шапки.
+static void draw_logo(int x, int y, Color bg)
+{
+    IconPng& ic = g_logoPng;
+    if (!ic.tried) {
+        ic.tried = true;
+        std::string blob;
+        if (FILE* f = fopen("/app0/assets/images/logo.png", "rb")) {
+            char buf[4096]; size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0) blob.append(buf, n);
+            fclose(f);
+        }
+        if (blob.empty() || !catalog_decode_rgba(blob, ic.w, ic.h, ic.px)) { ic.w = ic.h = 0; ic.px.clear(); logf_("ui: нет логотипа"); }
+    }
+    for (int yy = 0; yy < ic.h; yy++)
+        for (int xx = 0; xx < ic.w; xx++) {
+            uint32_t v = ic.px[(size_t)yy * ic.w + xx];
+            unsigned a = v >> 24;
+            if (!a) continue;
+            Color c;
+            c.r = (uint8_t)((((v >> 16) & 255) * a + bg.r * (255 - a)) / 255);
+            c.g = (uint8_t)((((v >> 8) & 255) * a + bg.g * (255 - a)) / 255);
+            c.b = (uint8_t)(((v & 255) * a + bg.b * (255 - a)) / 255);
+            g_scene->PutPixel(x + xx, y + yy, c);
+        }
 }
 
 static void draw_pad_icon(char kind, int x, int top, Color bg = C_BG)
@@ -408,6 +435,8 @@ static void load_games(bool fresh = false)
     std::string err;
     if (service_scan(items, err, fresh)) {
         build_games(items, g_games);
+        for (size_t i = g_games.size(); i-- > 0;)   // сам магазин в списке не нужен
+            if (g_games[i].title_id == SELF_TITLE_ID) g_games.erase(g_games.begin() + (long)i);
         g_tileImg.clear(); g_tileTried.clear();
         for (size_t i = 0; i < g_games.size(); i++)
             for (size_t k = 0; k < g_games[i].files.size(); k++)
@@ -455,6 +484,7 @@ static void load_installed()
     }
     g_games.clear();
     for (size_t i = 0; i < list.size(); i++) {
+        if (list[i].first == SELF_TITLE_ID) continue;   // сам магазин в списке не нужен
         Game g;
         g.title_id = list[i].first;
         g.title = list[i].second;
@@ -495,8 +525,39 @@ static int letter_index(char c) { return c == '#' ? 0 : (c - 'A' + 1); }
 
 static const char* REQ_PATH = "/data/ps4installer_app/requests.txt";
 
+// Позиция в каталоге (Title ID игры под курсором) хранится в файле, чтобы после выхода продолжить с того же места.
+static const char* STATE_PATH = "/data/ps4installer_app/state.txt";
+static std::string g_catalogPos;
+static bool g_catalogPosRead = false;
+
+static void catalog_pos_save()
+{
+    mkdir("/data/ps4installer_app", 0777);
+    if (FILE* f = fopen(STATE_PATH, "wb")) {
+        fprintf(f, "catalog=%s\n", g_catalogPos.c_str());
+        fclose(f);
+    }
+}
+
+static void catalog_pos_read()
+{
+    if (g_catalogPosRead) return;
+    g_catalogPosRead = true;
+    if (FILE* f = fopen(STATE_PATH, "rb")) {
+        char buf[256] = {0};
+        size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+        fclose(f);
+        std::string t(buf, n);
+        if (t.compare(0, 8, "catalog=") == 0) {
+            g_catalogPos = t.substr(8);
+            while (!g_catalogPos.empty() && (g_catalogPos.back() == '\n' || g_catalogPos.back() == '\r')) g_catalogPos.pop_back();
+        }
+    }
+}
+
 static void load_catalog_list()
 {
+    catalog_pos_read();
     std::vector<std::pair<std::string, std::string> > inst;
     service_installed_games(inst);   // не вышло - ничего страшного, просто покажем все игры
     std::vector<const CatEntry*> skip;
@@ -520,6 +581,15 @@ static void load_catalog_list()
     g_tileImg.clear(); g_tileTried.clear();
     if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
     g_topRow = 0;
+    if (!g_catalogPos.empty())   // возвращаемся к игре, на которой остановились
+        for (size_t i = 0; i < g_games.size(); i++)
+            if (g_games[i].title_id == g_catalogPos) {
+                g_cursor = (int)i;
+                int rows = ((int)g_games.size() + COLS - 1) / COLS;
+                g_topRow = g_cursor / COLS;
+                if (g_topRow > rows - ROWS_VIS) g_topRow = rows > ROWS_VIS ? rows - ROWS_VIS : 0;
+                break;
+            }
     memset(g_letterHas, 0, sizeof(g_letterHas));
     for (size_t i = 0; i < g_games.size(); i++) g_letterHas[letter_index(letter_of(g_games[i].title))] = true;
     g_stripFocus = false;
@@ -1333,11 +1403,9 @@ static void draw_all()
     fill(0, 0, FRAME_WIDTH, FRAME_HEIGHT, C_BG);
     fill(0, 0, FRAME_WIDTH, HEAD_H, C_HEAD);
 
-    // Место под логотип (картинку добавим позже).
     int x = MARGIN_X;
-    fill(x, 14, 160, HEAD_H - 28, C_LOGO);
-    draw_text("Logo", x + (160 - text_w("Logo")) / 2, 14 + (HEAD_H - 28) / 2 + FONT_PX / 3, C_DIM, C_LOGO);
-    x += 160 + 40;
+    draw_logo(x, (HEAD_H - 60) / 2, C_HEAD);
+    x += (g_logoPng.w > 0 ? g_logoPng.w : 160) + 40;
 
     // Вкладки. Ширина по тексту, активная выделена.
     draw_pad_icon('L', x, HEAD_H / 2 - ICON_S / 2, C_HEAD);
@@ -1396,7 +1464,7 @@ static void draw_all()
         FT_Set_Pixel_Sizes(g_font, 0, 20);
         int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : 12;
         std::string ver = std::string("версия ") + APP_VERSION + "   Created by SergioPoverony and Mr. Claude";
-        draw_text(ver, FRAME_WIDTH - MARGIN_X - count_cp(ver) * cell, FRAME_HEIGHT - 16, Color{ 95, 100, 115 }, C_BG);
+        draw_text(ver, (FRAME_WIDTH - count_cp(ver) * cell) / 2, FRAME_HEIGHT - 8, Color{ 95, 100, 115 }, C_BG);
         FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
     }
 }
@@ -1819,6 +1887,12 @@ void ui_pump()
         switch_list(TAB_INSTALLED);   // картинки установленных игр - по одной за проход, пока доступные ничего не просят
         tile_images_step();
         switch_list(TAB_AVAILABLE);
+    }
+
+    if (g_svc == SVC_OK && g_tab == TAB_CATALOG && g_load == LS_OK && !g_games.empty() && g_cursor < (int)g_games.size() &&
+        g_games[(size_t)g_cursor].title_id != g_catalogPos) {
+        g_catalogPos = g_games[(size_t)g_cursor].title_id;
+        catalog_pos_save();
     }
 
     // Крутилка на экране: перерисовываем примерно каждые 90 мс, чтобы она вращалась.

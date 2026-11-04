@@ -12,7 +12,7 @@ export DOTNET_ROLL_FORWARD := LatestMajor
 
 TITLE       := Game Store
 TITLE_ID    := OFST00001
-CONTENT_ID  := IV0000-OFST00001_00-OFFLINESTORE0000
+CONTENT_ID  := IV0000-OFST00001_00-PS4STORE00000000
 LIBS        := -lc -lkernel -lc++ -lSceVideoOut -lSceSysmodule -lSceFreeType -lScePad -lSceUserService -lSceSystemService -lSceNet
 EXTRAFLAGS  := -O2
 
@@ -29,7 +29,7 @@ ifneq ($(wildcard ../data/catalog.pak),)
 ASSETS      += assets/misc/catalog.json assets/misc/catalog.pak
 endif
 endif
-ASSETS      += assets/images/btn_cross.png assets/images/btn_circle.png assets/images/btn_square.png assets/images/btn_triangle.png assets/images/btn_l1.png assets/images/btn_r1.png assets/images/btn_l2.png assets/images/btn_r2.png
+ASSETS      += assets/images/btn_cross.png assets/images/btn_circle.png assets/images/btn_square.png assets/images/btn_triangle.png assets/images/btn_l1.png assets/images/btn_r1.png assets/images/btn_l2.png assets/images/btn_r2.png assets/images/logo.png
 ASSETS      += assets/misc/ps4installerd.elf
 $(info Каталог игр в PKG: $(if $(filter assets/misc/catalog.pak,$(ASSETS)),ВШИТ,НЕ вшит))
 
