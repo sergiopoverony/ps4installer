@@ -869,35 +869,24 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
         draw_text(letter, x + (TILE_W - g_cellW) / 2, y + IMG_H / 2 + FONT_PX / 3, C_TEXT, c);
     }
 
-    // Размер игры в углу картинки
-    if (!g.console && !g.listOnly) {
-        std::string sz = fmt_size(g.size);
-        int szw = text_w(sz) + 12;
-        fill(x + TILE_W - szw, y + IMG_H - FONT_PX - 10, szw, FONT_PX + 10, C_BG);
-        draw_text(sz, x + TILE_W - szw + 6, y + IMG_H - 9, C_DIM, C_BG);
-    }
-
-    // Уже установлена: полоса поверх картинки
-    if (g.installed && !g.console && !g.listOnly) {
-        std::string m = "УЖЕ УСТАНОВЛЕНО";
-        int w = text_w(m) + 16;
-        int mx = x + (TILE_W - w) / 2, my = y + IMG_H / 2 - (FONT_PX + 16) / 2;
-        fill(mx, my, w, FONT_PX + 16, C_GREEN);
-        draw_text(m, mx + 8, my + FONT_PX + 4, C_BG, C_GREEN);
-    }
-
-    if (g.incomplete && !g.installed) {
-        std::string m = "НЕ ДОКАЧАНО";
-        int w = text_w(m) + 16;
-        int mx = x + (TILE_W - w) / 2, my = y + IMG_H / 2 - (FONT_PX + 16) / 2;
-        fill(mx, my, w, FONT_PX + 16, C_RED_BG);
-        draw_text(m, mx + 8, my + FONT_PX + 4, C_TEXT, C_RED_BG);
-    } else if (!g.installed && game_queued(g)) {
-        std::string m = "В ОЧЕРЕДИ";
-        int w = text_w(m) + 16;
-        int mx = x + (TILE_W - w) / 2, my = y + IMG_H / 2 - (FONT_PX + 16) / 2;
-        fill(mx, my, w, FONT_PX + 16, C_WARN);
-        draw_text(m, mx + 8, my + FONT_PX + 4, C_BG, C_WARN);
+    // Нижняя полоса картинки: статус (на всю ширину) или, если статуса нет, размер игры в правом углу.
+    {
+        const char* m = nullptr;
+        Color sbg = C_GREEN, sfg = C_BG;
+        if (g.installed && !g.console && !g.listOnly) m = "УЖЕ УСТАНОВЛЕНО";
+        else if (g.incomplete && !g.installed) { m = "НЕ ДОКАЧАНО"; sbg = C_RED_BG; sfg = C_TEXT; }
+        else if (!g.installed && game_queued(g)) { m = "В ОЧЕРЕДИ"; sbg = C_WARN; sfg = C_BG; }
+        int sy = y + IMG_H - FONT_PX - 10;
+        if (m) {
+            std::string ms = m;
+            fill(x, sy, TILE_W, FONT_PX + 10, sbg);
+            draw_text(ms, x + (TILE_W - text_w(ms)) / 2, y + IMG_H - 9, sfg, sbg);
+        } else if (!g.console && !g.listOnly) {
+            std::string sz = fmt_size(g.size);
+            int szw = text_w(sz) + 12;
+            fill(x + TILE_W - szw, sy, szw, FONT_PX + 10, C_BG);
+            draw_text(sz, x + TILE_W - szw + 6, y + IMG_H - 9, C_DIM, C_BG);
+        }
     }
 
     // Пометки: патч / DLC / русификатор
