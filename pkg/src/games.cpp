@@ -1,4 +1,5 @@
 #include "games.h"
+#include "i18n.h"
 #include "utf8.h"
 
 #include <stdio.h>
@@ -90,8 +91,8 @@ std::string fmt_size(uint64_t b)
 {
     char buf[48];
     double gb = (double)b / (1024.0 * 1024.0 * 1024.0);
-    if (gb >= 1.0) snprintf(buf, sizeof(buf), "%.1f ГБ", gb);
-    else snprintf(buf, sizeof(buf), "%.0f МБ", (double)b / (1024.0 * 1024.0));
+    if (gb >= 1.0) snprintf(buf, sizeof(buf), "%.1f %s", gb, tr("unit.gb").c_str());
+    else snprintf(buf, sizeof(buf), "%.0f %s", (double)b / (1024.0 * 1024.0), tr("unit.mb").c_str());
     return buf;
 }
 
@@ -108,10 +109,10 @@ int file_rank(const PkgItem& it)
 std::string file_label(const PkgItem& it)
 {
     switch (file_rank(it)) {
-        case 0: return "Основной файл";
-        case 1: return it.ver.empty() ? "Патч" : "Патч " + it.ver;
-        case 2: return it.title.empty() ? "DLC" : "DLC: " + it.title;
-        default: return "Русификатор";
+        case 0: return tr("file.main");
+        case 1: return it.ver.empty() ? tr("file.patch") : trf("file.patch_ver", it.ver);
+        case 2: return it.title.empty() ? tr("file.dlc") : trf("file.dlc_name", it.title);
+        default: return tr("file.rus");
     }
 }
 

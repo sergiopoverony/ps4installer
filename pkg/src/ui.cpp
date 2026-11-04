@@ -7,6 +7,7 @@
 #include "log.h"
 #include "service.h"
 #include "games.h"
+#include "i18n.h"
 #include "utf8.h"
 
 #include <stdio.h>
@@ -24,6 +25,8 @@
 
 extern "C" uint64_t sceKernelGetProcessTime(void);
 extern "C" int sceSystemServiceHideSplashScreen(void);
+// Номер языка системы. Имя через asm-метку, чтобы не спорить с объявлением из заголовков тулчейна, если они подключены.
+extern "C" int sys_param_get_int(int paramId, int* value) __asm__("sceSystemServiceParamGetInt");
 
 #ifndef APP_VERSION
 #define APP_VERSION "0.0.0.0"
@@ -72,9 +75,8 @@ static int      g_frameID = 0;
 enum Tab { TAB_AVAILABLE = 0, TAB_INSTALLED = 1, TAB_CATALOG = 2, TAB_REQUESTS = 3, TAB_COUNT = 4 };
 static int g_tab = TAB_AVAILABLE;
 
-static const char* TAB_NAMES[TAB_COUNT] = {
-    "Доступные игры", "Установленные игры", "Каталог игр", "Запрос на игры"
-};
+static const char* TAB_KEYS[TAB_COUNT] = { "tab.available", "tab.installed", "tab.catalog", "tab.requests" };
+static std::string tab_name(int i) { return tr(TAB_KEYS[i]); }
 
 // ---------------------------------------------------------------- UTF-8 и текст
 
@@ -496,7 +498,7 @@ static void load_installed()
     std::vector<std::pair<std::string, std::string> > list;
     if (!service_installed_games(list)) {
         g_load = LS_ERROR;
-        g_loadErr = "служба не отвечает";
+        g_loadErr = tr("err.no_service");
         g_games.clear();
         return;
     }
@@ -889,11 +891,11 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
 
     // Нижняя полоса картинки: размер игры справа в углу (есть всегда) и, если есть, статус слева от него.
     {
-        const char* m = nullptr;
+        std::string m;
         Color sbg = C_GREEN, sfg = C_BG;
-        if (g.installed && !g.console && !g.listOnly) m = "УСТАНОВЛЕНО";
-        else if (g.incomplete && !g.installed) { m = "НЕ ДОКАЧАНО"; sbg = C_RED_BG; sfg = C_TEXT; }
-        else if (!g.installed && game_queued(g)) { m = "В ОЧЕРЕДИ"; sbg = C_WARN; sfg = C_BG; }
+        if (g.installed && !g.console && !g.listOnly) m = tr("tile.installed");
+        else if (g.incomplete && !g.installed) { m = tr("tile.incomplete"); sbg = C_RED_BG; sfg = C_TEXT; }
+        else if (!g.installed && game_queued(g)) { m = tr("tile.queued"); sbg = C_WARN; sfg = C_BG; }
         const int bh = FONT_PX + 10, sy = y + IMG_H - bh;
         int szw = 0;
         if (!g.console && !g.listOnly) {
@@ -902,7 +904,7 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
             fill(x + TILE_W - szw, sy, szw, bh, C_BG);
             draw_text(sz, x + TILE_W - szw + 6, y + IMG_H - 9, C_DIM, C_BG);
         }
-        if (m) {   // статус мельче (24 px), чтобы поместился рядом с размером
+        if (!m.empty()) {   // статус мельче (24 px), чтобы поместился рядом с размером
             FT_Set_Pixel_Sizes(g_font, 0, 24);
             int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : 14;
             int sw = TILE_W - szw;
@@ -936,16 +938,16 @@ static void draw_service_message()
 {
     int y = GRID_TOP + 60;
     if (g_svc == SVC_CHECK) {
-        draw_loading("Проверка службы установки...");
+        draw_loading(tr("svc.checking"));
     } else if (g_svc == SVC_STARTING) {
-        draw_loading("Запуск службы установки...", "Это занимает несколько секунд.");
+        draw_loading(tr("svc.starting"), tr("svc.starting_sub"));
     } else if (g_svc == SVC_NO_LOADER) {
-        draw_text("Не удалось запустить службу: загрузчик payload'ов выключен.", MARGIN_X, y, C_WARN, C_BG);
-        draw_text("Включите в GoldHEN: Servers settings - Enable Payloader Server.", MARGIN_X, y + 50, C_TEXT, C_BG);
-        draw_hint("Затем нажмите {S}.", MARGIN_X, y + 100, C_DIM, C_BG);
+        draw_text(tr("svc.noloader1"), MARGIN_X, y, C_WARN, C_BG);
+        draw_text(tr("svc.noloader2"), MARGIN_X, y + 50, C_TEXT, C_BG);
+        draw_hint(tr("svc.noloader3"), MARGIN_X, y + 100, C_DIM, C_BG);
     } else {
-        draw_text("Служба установки не запустилась.", MARGIN_X, y, C_WARN, C_BG);
-        draw_hint("Подождите немного и нажмите {S}. Если не помогает, перезапустите GoldHEN.", MARGIN_X, y + 50, C_DIM, C_BG);
+        draw_text(tr("svc.failed1"), MARGIN_X, y, C_WARN, C_BG);
+        draw_hint(tr("svc.failed2"), MARGIN_X, y + 50, C_DIM, C_BG);
     }
 }
 
@@ -955,24 +957,24 @@ static void draw_letter_strip();
 static void draw_available()
 {
     if (g_load == LS_LOADING || g_load == LS_NONE) {
-        draw_loading("Загрузка списка игр...");
+        draw_loading(tr("list.loading"));
         return;
     }
     if (g_load == LS_ERROR) {
-        draw_text("Служба установки не отвечает.", MARGIN_X, GRID_TOP + 60, C_WARN, C_BG);
-        draw_hint("Запустите ps4installerd (адрес 127.0.0.1, порт 8284) и нажмите {S}.", MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
-        draw_text("Причина: " + g_loadErr, MARGIN_X, GRID_TOP + 160, C_DIM, C_BG);
+        draw_text(tr("list.noresp1"), MARGIN_X, GRID_TOP + 60, C_WARN, C_BG);
+        draw_hint(tr("list.noresp2"), MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
+        draw_text(trf("list.reason", g_loadErr), MARGIN_X, GRID_TOP + 160, C_DIM, C_BG);
         return;
     }
     if (g_games.empty()) {
         if (g_tab == TAB_INSTALLED) {
-            draw_text("Установленных игр не найдено.", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
-            draw_hint("Нажмите {S}, чтобы обновить список.", MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
+            draw_text(tr("list.empty_installed"), MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
+            draw_hint(tr("list.refresh"), MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
         } else if (g_tab == TAB_CATALOG) {
-            draw_text("Каталог игр не найден или пуст.", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
+            draw_text(tr("list.empty_catalog"), MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
         } else {
-            draw_text("Игр не найдено.", MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
-            draw_hint("Подключите флешку или диск с играми и нажмите {S}.", MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
+            draw_text(tr("list.empty"), MARGIN_X, GRID_TOP + 60, C_TEXT, C_BG);
+            draw_hint(tr("list.empty_hint"), MARGIN_X, GRID_TOP + 110, C_DIM, C_BG);
         }
         return;
     }
@@ -1010,11 +1012,11 @@ static void draw_letter_strip()
 
 static void draw_requests()
 {
-    if (g_load == LS_LOADING || g_load == LS_NONE) { draw_loading("Загрузка списка запросов..."); return; }
+    if (g_load == LS_LOADING || g_load == LS_NONE) { draw_loading(tr("req.loading")); return; }
     int top = HEAD_H + 30, w = FRAME_WIDTH - 2 * MARGIN_X;
     if (g_games.empty()) {
-        draw_text("Запросов пока нет.", MARGIN_X, top + 40, C_TEXT, C_BG);
-        draw_hint("Откройте игру во вкладке «Каталог игр» и нажмите {X} - запросить.", MARGIN_X, top + 90, C_DIM, C_BG);
+        draw_text(tr("req.none"), MARGIN_X, top + 40, C_TEXT, C_BG);
+        draw_hint(tr("req.none_hint"), MARGIN_X, top + 90, C_DIM, C_BG);
         return;
     }
     for (int r = 0; r < REQ_ROWS_VIS; r++) {
@@ -1190,8 +1192,8 @@ static int draw_space_info(int x, int y, int w, bool center)
     FT_Set_Pixel_Sizes(g_font, 0, DESC_PX);
     int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : g_cellW * DESC_PX / FONT_PX;
     int ly = y + needH + 10 + DESC_PX;
-    std::string a = "Нужно: " + fmt_size(g_selNeed);
-    std::string b = g_freeOk ? "Свободно: " + fmt_size(g_freeBytes) : "Свободное место узнать не удалось";
+    std::string a = trf("space.need", fmt_size(g_selNeed));
+    std::string b = g_freeOk ? trf("space.free", fmt_size(g_freeBytes)) : tr("space.unknown");
     draw_text(a, center ? x + (w - count_cp(a) * cell) / 2 : x, ly, C_BAR_NEED, C_PANEL);
     draw_text(b, center ? x + (w - count_cp(b) * cell) / 2 : x, ly + DESC_PX + 8, g_freeOk ? C_BAR_FREE : C_WARN, C_PANEL);
     FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
@@ -1211,14 +1213,14 @@ static void draw_confirm()
 
     if (g_cardReason == CARD_LAUNCH) {   // окно установленной игры: только запуск
         if (!g_confirmErr.empty()) draw_text(fit_chars(g_confirmErr, maxc), tx, y + H - 130 + 36, C_WARN, C_PANEL);
-        std::string h = is_self(g_sel) ? "{X} - запустить игру      {O} - закрыть" : "{X} - запустить игру      {T} - удалить      {O} - закрыть";
+        std::string h = tr(is_self(g_sel) ? "hint.launch" : "hint.launch_del");
         draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
         return;
     }
 
     if (g_cardReason == CARD_REQUEST) {   // игра из каталога: запросить
         if (!g_confirmErr.empty()) draw_text(fit_chars(g_confirmErr, maxc), tx, y + H - 130 + 36, g_confirmOk ? C_GREEN : C_WARN, C_PANEL);
-        std::string h = "{X} - запросить      {O} - закрыть";
+        std::string h = tr("hint.request");
         draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
         return;
     }
@@ -1229,8 +1231,8 @@ static void draw_confirm()
     bool low = g_cardReason == CARD_OK && g_freeOk && g_selNeed > g_freeBytes;
     int bx = x + 30 + COVER_W + 30, bw = W - (bx - x) - 30, by = sy;
     if (g_cardReason != CARD_OK) {
-        const char* msg = g_cardReason == CARD_INSTALLED ? "УЖЕ УСТАНОВЛЕНО" :
-                          g_cardReason == CARD_INCOMPLETE ? "НЕ ДОКАЧАНО - ДОЖДИТЕСЬ ЗАГРУЗКИ ФАЙЛОВ" : "УЖЕ В ОЧЕРЕДИ НА УСТАНОВКУ";
+        const std::string& msg = tr(g_cardReason == CARD_INSTALLED ? "card.installed" :
+                          g_cardReason == CARD_INCOMPLETE ? "card.incomplete" : "card.queued");
         Color bg = g_cardReason == CARD_INCOMPLETE ? C_RED_BG : g_cardReason == CARD_INSTALLED ? C_GREEN : C_WARN;
         Color fg = g_cardReason == CARD_INCOMPLETE ? C_TEXT : C_BG;
         fill(bx, by, bw, 52, bg);
@@ -1238,14 +1240,14 @@ static void draw_confirm()
         draw_text(m, bx + (bw - text_w(m)) / 2, by + 36, fg, bg);
     } else if (low) {
         fill(bx, by, bw, 52, C_RED_BG);
-        std::string msg = "МАЛО МЕСТА - УДАЛИТЕ НЕНУЖНУЮ ИГРУ";
+        std::string msg = tr("card.lowspace");
         draw_text(msg, bx + (bw - text_w(msg)) / 2, by + 36, C_TEXT, C_RED_BG);
     } else if (!g_confirmErr.empty()) {
         draw_text(fit_chars(g_confirmErr, bw / g_cellW), bx, by + 36, C_WARN, C_PANEL);
     }
     bool can = g_cardReason == CARD_OK && !low;
-    std::string hint = can ? "{X} - установить      {O} - закрыть" : "{X} - установить (недоступно)      {O} - закрыть";
-    if (g_cardReason == CARD_QUEUED) hint += "      {T} - ход установки";
+    std::string hint = tr(can ? "hint.install" : "hint.install_no");
+    if (g_cardReason == CARD_QUEUED) hint += "      " + tr("hint.queued_suffix");
     draw_hint(hint, x + (W - hint_w(hint)) / 2, y + H - 36, can ? C_TEXT : C_DIM, C_PANEL);
 }
 
@@ -1255,13 +1257,13 @@ static void draw_delete()
     int x = (FRAME_WIDTH - W) / 2, y = (FRAME_HEIGHT - H) / 2;
     draw_panel(x, y, W, H);
     int maxc = (W - 80) / g_cellW;
-    std::string q = g_tab == TAB_REQUESTS ? "ТОЧНО УДАЛИТЬ ИГРУ ИЗ СПИСКА ЗАПРОСОВ?" : "ТОЧНО УДАЛИТЬ ВЫБРАННУЮ ИГРУ?";
+    std::string q = tr(g_tab == TAB_REQUESTS ? "del.q_request" : "del.q");
     draw_text(q, x + (W - text_w(q)) / 2, y + 80, C_TEXT, C_PANEL);
     std::string t = fit_chars(g_sel.title, maxc);
     fill(x + 40, y + 120, W - 80, FONT_PX + 24, C_RED_BG);
     draw_text(t, x + (W - text_w(t)) / 2, y + 120 + FONT_PX + 8, C_TEXT, C_RED_BG);
     if (!g_deleteErr.empty()) draw_text(fit_chars(g_deleteErr, maxc), x + 40, y + 240, C_WARN, C_PANEL);
-    std::string h = "{X} - да      {O} - НЕТ";
+    std::string h = tr("hint.yesno");
     draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 50, C_TEXT, C_PANEL);
 }
 
@@ -1305,7 +1307,7 @@ static void draw_progress()
         std::string gt = job_game(j);
         bool header = gt != lastGame;
         if (ty + (header ? 2 : 1) * (FONT_PX + 10) > y + H - 140) {
-            draw_text("... и ещё файлов: " + std::to_string(g_inst.jobs.size() - shown), tx + 20, ty, C_DIM, C_PANEL);
+            draw_text(trf("prog.more", std::to_string(g_inst.jobs.size() - shown)), tx + 20, ty, C_DIM, C_PANEL);
             break;
         }
         if (header) {
@@ -1318,17 +1320,17 @@ static void draw_progress()
         std::string st, label = job_label(j);
         Color col = C_DIM;
         bool dimLabel = true;
-        if (j.status == "done") { st = "готово"; col = C_GREEN; }
-        else if (j.status == "already_installed") { st = "уже установлено"; col = C_GREEN; }
+        if (j.status == "done") { st = tr("prog.done"); col = C_GREEN; }
+        else if (j.status == "already_installed") { st = tr("prog.already"); col = C_GREEN; }
         else if (j.status == "installing") {
             int p = j.length > 0 ? (int)(j.transferred * 100 / j.length) : 0;
             st = std::to_string(p) + "%";
             col = C_TEXT; dimLabel = false;
         }
-        else if (j.status == "registering") { st = "подготовка"; col = C_TEXT; dimLabel = false; }
-        else if (j.status == "failed") { st = "ошибка"; col = C_WARN; }
-        else if (j.status == "cancelled") { st = "отменено"; }
-        else st = "ожидает";
+        else if (j.status == "registering") { st = tr("prog.prep"); col = C_TEXT; dimLabel = false; }
+        else if (j.status == "failed") { st = tr("prog.failed"); col = C_WARN; }
+        else if (j.status == "cancelled") { st = tr("prog.cancelled"); }
+        else st = tr("prog.waiting");
         draw_text(fit_chars(label, maxc - 30), tx + 40, ty, dimLabel ? C_DIM : C_TEXT, C_PANEL);
         draw_text(st, x + W - 40 - text_w(st), ty, col, C_PANEL);
         ty += FONT_PX + 10;
@@ -1338,11 +1340,11 @@ static void draw_progress()
         std::string m;
         for (size_t i = 0; i < g_inst.jobs.size(); i++)
             if (g_inst.jobs[i].status == "failed") { m = g_inst.jobs[i].message; break; }
-        draw_text(fit_chars("Ошибка: " + m, maxc), tx, by + 36, C_WARN, C_PANEL);
+        draw_text(fit_chars(trf("prog.error", m), maxc), tx, by + 36, C_WARN, C_PANEL);
     } else if (g_instFinished) {
-        draw_text("Готово! Установка завершена.", tx, by + 36, C_GREEN, C_PANEL);
+        draw_text(tr("prog.finished"), tx, by + 36, C_GREEN, C_PANEL);
     }
-    std::string hint = g_instFinished ? "{O} - закрыть" : "{O} - скрыть окно (установка продолжится)";
+    std::string hint = tr(g_instFinished ? "hint.prog_finished" : "hint.prog_running");
     draw_hint(hint, x + (W - hint_w(hint)) / 2, y + H - 36, C_TEXT, C_PANEL);
 }
 
@@ -1369,7 +1371,7 @@ static void draw_all()
     draw_shoulder_tab("L1", x);
     x += SHOULDER_TAB_W + 16;
     for (int i = 0; i < TAB_COUNT; i++) {
-        std::string name = TAB_NAMES[i];
+        std::string name = tab_name(i);
         int w = text_w(name) + 40;
         Color bg = (i == g_tab) ? C_TAB_ON : C_TAB_OFF;
         fill(x, 14, w, HEAD_H - 28, bg);
@@ -1380,7 +1382,7 @@ static void draw_all()
     draw_shoulder_tab("R1", x);
 
     if (g_workerBusy) {
-        draw_loading(g_tab == TAB_REQUESTS ? "Загрузка списка запросов..." : "Загрузка списка игр...");
+        draw_loading(tr(g_tab == TAB_REQUESTS ? "req.loading" : "list.loading"));
         return;
     }
     if (g_svc != SVC_OK) {
@@ -1390,7 +1392,7 @@ static void draw_all()
     } else if (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED || g_tab == TAB_CATALOG) {
         draw_available();
     } else {
-        std::string body = std::string("Здесь будет вкладка «") + TAB_NAMES[g_tab] + "»";
+        std::string body = trf("tab.placeholder", tab_name(g_tab));
         draw_text(body, MARGIN_X, HEAD_H + 120, C_TEXT, C_BG);
     }
 
@@ -1400,28 +1402,26 @@ static void draw_all()
 
     // Идёт установка, а окно скрыто: короткая строка под сеткой
     if (g_instActive && g_mode == MODE_GRID) {
-        char b[160];
-        snprintf(b, sizeof(b), "Идёт установка: %d%%", overall_pct());
+        std::string b = trf("head.installing", std::to_string(overall_pct()));
         draw_text(fit_chars(g_instTitle, 40) + " - " + b, MARGIN_X + 480, FRAME_HEIGHT - 90, C_GREEN, C_BG);
     }
 
     // Нижняя строка
-    const char* hint = "";
+    std::string hint;
     if (g_tab == TAB_INSTALLED && g_mode == MODE_GRID)
-        hint = "{X} - открыть    {T} - удалить    {S} - обновить";   // у самого магазина удаление отключено в обработчике
+        hint = tr("hint.installed_tab");   // у самого магазина удаление отключено в обработчике
     else if (g_tab == TAB_CATALOG && g_mode == MODE_GRID)
-        hint = g_stripFocus ? "влево / вправо - буква    вниз - к играм    {T} - к играм" : "{X} - информация    {T} - алфавит    {l} / {r} - по буквам";
+        hint = tr(g_stripFocus ? "hint.catalog_strip" : "hint.catalog");
     else if (g_tab == TAB_REQUESTS && g_mode == MODE_GRID)
-        hint = g_games.empty() ? "" : "{O} - удалить из списка";
+        hint = g_games.empty() ? std::string() : tr("hint.requests");
     else if (g_tab == TAB_AVAILABLE && g_mode == MODE_GRID)
-        hint = g_instActive ? "{X} - в очередь    {T} - ход установки    {S} - обновить"
-                            : "{X} - установить    {S} - обновить";
+        hint = g_instActive ? tr("hint.avail_busy") : tr("hint.avail");
     else if (g_mode != MODE_GRID) hint = "";
     draw_hint(hint, (FRAME_WIDTH - hint_w(hint)) / 2, FRAME_HEIGHT - 40, C_DIM, C_BG);
     {   // версия и авторы: мелко и темно, в правом нижнем углу
         FT_Set_Pixel_Sizes(g_font, 0, 20);
         int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : 12;
-        std::string ver = std::string("версия ") + APP_VERSION + " Created by SergioPoverony and Mr.Claude";
+        std::string ver = tr("foot.version") + " " + APP_VERSION + " Created by SergioPoverony and Mr.Claude";
         draw_text(ver, (FRAME_WIDTH - count_cp(ver) * cell) / 2, FRAME_HEIGHT - 8, Color{ 95, 100, 115 }, C_BG);
         FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
     }
@@ -1472,6 +1472,22 @@ bool ui_init()
     if (!FT_Load_Glyph(g_font, gi, FT_LOAD_DEFAULT)) {
         int w = (int)(g_font->glyph->advance.x >> 6);
         if (w > 0) g_cellW = w;
+    }
+    {   // язык интерфейса: из настроек системы; для проверок можно записать код языка в /data/ps4installer_app/lang.txt
+        int sysLang = 1;
+        int v = 0;
+        if (sys_param_get_int(2, &v) == 0) sysLang = v;   // 2 - ORBIS_SYSTEM_SERVICE_PARAM_ID_LANG
+        std::string code = i18n_code_for_system_lang(sysLang);
+        if (FILE* f = fopen("/data/ps4installer_app/lang.txt", "rb")) {
+            char b[16] = {0};
+            size_t n = fread(b, 1, sizeof(b) - 1, f);
+            fclose(f);
+            std::string c(b, n);
+            while (!c.empty() && (c.back() == '\n' || c.back() == '\r' || c.back() == ' ')) c.pop_back();
+            if (!c.empty()) code = c;
+        }
+        i18n_load("/app0/assets/lang", code);
+        logf_("ui: язык системы %d, язык интерфейса %s", sysLang, code.c_str());
     }
     bool padOk = pad_init();
     logf_("ui: ready, cell width %d, pad %s", g_cellW, padOk ? "ok" : "FAILED");
@@ -1556,13 +1572,13 @@ static bool request_game(const Game& g, std::string& msg)
         while ((n = fread(buf, 1, sizeof(buf), f)) > 0) all.append(buf, n);
         fclose(f);
     }
-    if (all.find(line + "\n") != std::string::npos) { msg = "Уже запрошено ранее"; return true; }
+    if (all.find(line + "\n") != std::string::npos) { msg = tr("req.already"); return true; }
     mkdir("/data/ps4installer_app", 0777);
     FILE* f = fopen(path, "ab");
-    if (!f) { msg = "Не удалось записать запрос"; return false; }
+    if (!f) { msg = tr("req.fail_write"); return false; }
     fputs((line + "\n").c_str(), f);
     fclose(f);
-    msg = "Запрос записан";
+    msg = tr("req.saved");
     return true;
 }
 
@@ -1774,7 +1790,7 @@ void ui_pump()
         else if ((cp & ORBIS_PAD_BUTTON_CROSS) && g_cardReason == CARD_LAUNCH) {
             std::string err;
             logf_("ui: запуск игры %s", g_sel.title_id.c_str());
-            if (service_launch(g_sel.title_id, err)) g_confirmErr = "Запускаю игру...";
+            if (service_launch(g_sel.title_id, err)) g_confirmErr = tr("card.launching");
             else { g_confirmErr = "Не удалось запустить: " + err; logf_("ui: запуск не удался: %s", err.c_str()); }
             g_redraw = 2;
         }
@@ -1789,7 +1805,7 @@ void ui_pump()
                 if (!g_instActive) { g_queuedFiles.clear(); g_queuedTitle.clear(); g_queuedGames = 0; g_inst = InstallStatus(); }
                 for (size_t i = 0; i < g_selFiles.size(); i++) { g_queuedFiles.push_back(g_selFiles[i]); g_queuedTitle.push_back(g_sel.title); }
                 g_queuedGames++;
-                g_instTitle = g_queuedGames > 1 ? "Очередь установки (игр: " + std::to_string(g_queuedGames) + ")" : g_sel.title;
+                g_instTitle = g_queuedGames > 1 ? trf("prog.title_many", std::to_string(g_queuedGames)) : g_sel.title;
                 g_instActive = true;
                 g_instFinished = false;
                 g_lastPoll = 0;
@@ -1797,7 +1813,7 @@ void ui_pump()
                 g_mode = MODE_PROGRESS;
                 logf_("ui: установка запущена: %s (%d файлов)", g_sel.title.c_str(), (int)paths.size());
             } else {
-                g_confirmErr = "Не удалось начать установку: " + err;
+                g_confirmErr = trf("prog.fail_start", err);
                 logf_("ui: install error: %s", err.c_str());
             }
             g_redraw = 2;
@@ -1811,7 +1827,7 @@ void ui_pump()
                 logf_("ui: запрос удалён из списка: %s", g_sel.title.c_str());
                 g_mode = MODE_GRID;
                 g_load = LS_LOADING;   // перечитать список
-            } else g_deleteErr = "Не удалось изменить список запросов";
+            } else g_deleteErr = tr("req.fail_change");
             g_redraw = 2;
         }
         else if (dp & ORBIS_PAD_BUTTON_CROSS) {
@@ -1824,7 +1840,7 @@ void ui_pump()
                 g_load = LS_LOADING;   // перечитать список
                 mark_installed();
             } else {
-                g_deleteErr = "Не удалось удалить: " + err;
+                g_deleteErr = trf("del.fail", err);
                 logf_("ui: удаление не удалось: %s", err.c_str());
             }
             g_redraw = 2;

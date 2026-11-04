@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "games.h"
+#include "i18n.h"
 #include "utf8.h"
 
 static PkgItem mk(const char* title_id, const char* kind, const char* title, uint64_t size, const char* path,
@@ -26,6 +27,19 @@ static PkgItem mk(const char* title_id, const char* kind, const char* title, uin
 
 int main()
 {
+    // --- язык: русский файл, запасной английский, подстановки
+    i18n_load(LANG_DIR, "ru");
+    assert(tr("tab.catalog") == "Каталог игр");
+    assert(trf("space.need", "5 ГБ") == "Нужно: 5 ГБ");
+    assert(tr("нет.такого.ключа") == "нет.такого.ключа");
+    i18n_load(LANG_DIR, "en");
+    assert(tr("tab.catalog") == "Games catalog");
+    assert(fmt_size(1048576ULL) == "1 MB");
+    i18n_load(LANG_DIR, "xx");   // нет файла языка - остаётся английский
+    assert(tr("tab.catalog") == "Games catalog");
+    assert(i18n_code_for_system_lang(8) == "ru" && i18n_code_for_system_lang(1) == "en" && i18n_code_for_system_lang(18) == "en");
+    i18n_load(LANG_DIR, "ru");
+
     // --- группировка
     {
         std::vector<PkgItem> in;
