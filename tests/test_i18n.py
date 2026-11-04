@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-LANG = ROOT / "pkg" / "assets" / "lang"
+LANG = ROOT / "pkg" / "assets" / "misc"
 
 
 def load(p):
@@ -21,8 +21,8 @@ def load(p):
 
 class I18nTest(unittest.TestCase):
     def test_same_keys_and_placeholders(self):
-        en = load(LANG / "en.txt")
-        for p in sorted(LANG.glob("*.txt")):
+        en = load(LANG / "lang_en.txt")
+        for p in sorted(LANG.glob("lang_*.txt")):
             d = load(p)
             self.assertEqual(set(d), set(en), "ключи %s не совпадают с en.txt" % p.name)
             for k, v in d.items():
@@ -30,7 +30,7 @@ class I18nTest(unittest.TestCase):
                 self.assertTrue(v.strip(), "%s: пустой текст %s" % (p.name, k))
 
     def test_code_keys_exist(self):
-        en = load(LANG / "en.txt")
+        en = load(LANG / "lang_en.txt")
         used = set()
         for p in (ROOT / "pkg" / "src").glob("*.cpp"):
             text = p.read_text(encoding="utf-8")

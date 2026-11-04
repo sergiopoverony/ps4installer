@@ -37,8 +37,8 @@ static void load_file(const std::string& path)
 void i18n_load(const std::string& dir, const std::string& lang)
 {
     g_texts.clear();
-    load_file(dir + "/en.txt");
-    if (lang != "en") load_file(dir + "/" + lang + ".txt");
+    load_file(dir + "/lang_en.txt");
+    if (lang != "en") load_file(dir + "/lang_" + lang + ".txt");
 }
 
 const std::string& tr(const char* key)

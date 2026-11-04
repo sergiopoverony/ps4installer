@@ -1486,7 +1486,7 @@ bool ui_init()
             while (!c.empty() && (c.back() == '\n' || c.back() == '\r' || c.back() == ' ')) c.pop_back();
             if (!c.empty()) code = c;
         }
-        i18n_load("/app0/assets/lang", code);
+        i18n_load("/app0/assets/misc", code);
         logf_("ui: язык системы %d, язык интерфейса %s", sysLang, code.c_str());
     }
     bool padOk = pad_init();

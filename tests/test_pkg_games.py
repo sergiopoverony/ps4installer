@@ -15,7 +15,7 @@ class PkgGamesTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             exe = Path(td) / "t"
             cmd = ["g++", "-std=c++17", "-g", "-fsanitize=address,undefined", "-Wall", "-Wextra",
-                   "-I" + str(ROOT / "pkg" / "src"), '-DLANG_DIR="%s"' % (ROOT / "pkg" / "assets" / "lang"), str(ROOT / "tests" / "test_pkg_games.cpp"),
+                   "-I" + str(ROOT / "pkg" / "src"), '-DLANG_DIR="%s"' % (ROOT / "pkg" / "assets" / "misc"), str(ROOT / "tests" / "test_pkg_games.cpp"),
                    str(ROOT / "pkg" / "src" / "games.cpp"), str(ROOT / "pkg" / "src" / "utf8.cpp"), str(ROOT / "pkg" / "src" / "i18n.cpp"),
                    "-o", str(exe)]
             subprocess.run(cmd, check=True)
