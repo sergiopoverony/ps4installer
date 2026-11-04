@@ -27,6 +27,8 @@
 extern "C" uint64_t sceKernelGetProcessTime(void);
 extern "C" int sceSystemServiceHideSplashScreen(void);
 // Номер языка системы. Имя через asm-метку, чтобы не спорить с объявлением из заголовков тулчейна, если они подключены.
+// Штатный выход из приложения на главный экран.
+extern "C" int sys_load_exec(const char* path, char* const argv[]) __asm__("sceSystemServiceLoadExec");
 extern "C" int sys_param_get_int(int paramId, int* value) __asm__("sceSystemServiceParamGetInt");
 
 #ifndef APP_VERSION
@@ -1356,7 +1358,7 @@ static const LangItem LANGS[] = { { "ru", "Русский" }, { "en", "English" 
 static const int LANG_N = 2;
 static int g_sysLang = 1;                // номер языка системы
 static std::string g_langChoice;         // выбранный в меню код языка; пусто - язык системы
-static int g_optSub = 0, g_optCur = 0;   // 0 - главное меню, 1 - выбор языка; строка под курсором
+static int g_optCur = 0;                 // строка меню под курсором
 
 // Код языка из lang.txt (только буквы); пусто, если файла нет.
 static std::string lang_saved_read()
@@ -1384,37 +1386,51 @@ static void lang_apply(const std::string& choice, bool save)
     }
 }
 
+// Список для переключения языка по кругу: сначала «авто» (язык системы), затем все языки приложения.
+static std::string lang_label()
+{
+    std::string code = g_langChoice.empty() ? i18n_code_for_system_lang(g_sysLang) : g_langChoice;
+    std::string name = code;
+    for (int i = 0; i < LANG_N; i++) if (code == LANGS[i].code) name = LANGS[i].name;
+    return tr("opt.language") + ": " + (g_langChoice.empty() ? tr("opt.auto") + " (" + name + ")" : name);
+}
+
+static void lang_cycle(int dir)
+{
+    int cur = 0;   // 0 - авто, 1.. - LANGS[i-1]
+    for (int i = 0; i < LANG_N; i++) if (g_langChoice == LANGS[i].code) cur = i + 1;
+    cur = (cur + dir + LANG_N + 1) % (LANG_N + 1);
+    lang_apply(cur == 0 ? std::string() : std::string(LANGS[cur - 1].code), true);
+}
+
+static const int OPT_N = 4;   // язык / пусто / пусто / закрыть приложение
+
+static std::string opt_label(int i)
+{
+    return i == 0 ? lang_label() : i == OPT_N - 1 ? tr("opt.quit") : tr("opt.empty");
+}
+
 static void draw_options()
 {
-    const int W = 900, ROW = 70;
-    const bool sub = g_optSub == 1;
-    const int n = sub ? LANG_N + 1 : 4;
-    const int H = 150 + n * ROW + 110;
+    const int ROW = 64;
+    int maxc = 0;
+    for (int i = 0; i < OPT_N; i++) maxc = std::max(maxc, count_cp(opt_label(i)));   // ширина по самой длинной подписи
+    int W = std::max(700, maxc * g_cellW + 140);
+    if (W > FRAME_WIDTH - 200) W = FRAME_WIDTH - 200;
+    const int H = 100 + OPT_N * ROW + 90;
     int x = (FRAME_WIDTH - W) / 2, y = (FRAME_HEIGHT - H) / 2;
     draw_panel(x, y, W, H);
-    std::string title = tr(sub ? "opt.lang_title" : "opt.title");
-    draw_text(title, x + (W - text_w(title)) / 2, y + 70, C_TEXT, C_PANEL);
-    for (int i = 0; i < n; i++) {
-        std::string t;
-        bool dim = false;
-        if (!sub) {
-            t = i == 0 ? tr("opt.language") : i == 3 ? tr("opt.quit") : tr("opt.empty");
-            dim = i == 1 || i == 2;
-        } else if (i == 0) {
-            t = tr("opt.lang_auto");
-            if (g_langChoice.empty()) t = "* " + t;
-        } else {
-            t = LANGS[i - 1].name;
-            if (g_langChoice == LANGS[i - 1].code) t = "* " + t;
-        }
-        int ry = y + 110 + i * ROW;
+    std::string title = tr("opt.title");
+    draw_text(title, x + (W - text_w(title)) / 2, y + 62, C_TEXT, C_PANEL);
+    for (int i = 0; i < OPT_N; i++) {
+        int ry = y + 90 + i * ROW;
         Color bg = i == g_optCur ? C_TAB_ON : C_TILE;
         fill(x + 40, ry, W - 80, ROW - 10, bg);
-        t = fit_chars(t, (W - 140) / g_cellW);
-        draw_text(t, x + 70, ry + (ROW - 10) / 2 + FONT_PX / 3, dim ? C_DIM : C_TEXT, bg);
+        std::string t = fit_chars(opt_label(i), (W - 140) / g_cellW);
+        draw_text(t, x + 70, ry + (ROW - 10) / 2 + FONT_PX / 3, (i == 1 || i == 2) ? C_DIM : C_TEXT, bg);
     }
-    std::string h = tr(sub ? "hint.opt_sub" : "hint.opt");
-    draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 40, C_TEXT, C_PANEL);
+    std::string h = tr("hint.opt");
+    draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
 }
 
 // L1 / R1 в шапке: прямоугольник той же высоты, что и вкладки.
@@ -1700,22 +1716,17 @@ void ui_pump()
     if (dirs) nextRepeat = now + 350000;
     else if ((b & DIRS) && now >= nextRepeat) { dirs = b & DIRS; nextRepeat = now + 110000; }
 
-    if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_OPTIONS)) { g_mode = MODE_OPTIONS; g_optSub = 0; g_optCur = 0; g_redraw = 2; pressed = 0; dirs = 0; }
+    if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_OPTIONS)) { g_mode = MODE_OPTIONS; g_optCur = 0; g_redraw = 2; pressed = 0; dirs = 0; }
     if (g_mode == MODE_OPTIONS) {
-        const int n = g_optSub == 1 ? LANG_N + 1 : 4;
         int dy = (dirs & ORBIS_PAD_BUTTON_DOWN ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_UP ? 1 : 0);
-        if (dy) { g_optCur = (g_optCur + dy + n) % n; g_redraw = 2; }
-        if (pressed & ORBIS_PAD_BUTTON_CIRCLE) {
-            if (g_optSub == 1) { g_optSub = 0; g_optCur = 0; } else g_mode = MODE_GRID;
-            g_redraw = 2;
-        } else if (pressed & ORBIS_PAD_BUTTON_CROSS) {
-            if (g_optSub == 0) {
-                if (g_optCur == 0) { g_optSub = 1; g_optCur = 0; g_redraw = 2; }
-                else if (g_optCur == 3) { logf_("ui: выход из приложения по меню"); exit(0); }
-            } else {
-                lang_apply(g_optCur == 0 ? std::string() : std::string(LANGS[g_optCur - 1].code), true);
-                g_redraw = 2;
-            }
+        int dx = (dirs & ORBIS_PAD_BUTTON_RIGHT ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_LEFT ? 1 : 0);
+        if (dy) { g_optCur = (g_optCur + dy + OPT_N) % OPT_N; g_redraw = 2; }
+        if (pressed & ORBIS_PAD_BUTTON_CIRCLE) { g_mode = MODE_GRID; g_redraw = 2; }
+        else if (g_optCur == 0 && (dx || (pressed & ORBIS_PAD_BUTTON_CROSS))) { lang_cycle(dx ? dx : 1); g_redraw = 2; }   // язык листается стрелками и Крестом, меню остаётся открытым
+        else if (g_optCur == OPT_N - 1 && (pressed & ORBIS_PAD_BUTTON_CROSS)) {
+            logf_("ui: закрытие приложения по меню");
+            int r = sys_load_exec("exit", nullptr);   // штатный выход на главный экран; если не вышло - остаёмся в приложении
+            logf_("ui: sceSystemServiceLoadExec(exit) = 0x%08X", (unsigned)r);
         }
         pressed = 0; dirs = 0;   // остальные кнопки под меню не работают
     }
