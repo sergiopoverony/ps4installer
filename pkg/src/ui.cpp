@@ -309,6 +309,11 @@ static void switch_list(int newTab)
 }
 
 // Окна: подтверждение установки и ход установки.
+static const Color C_BAR_TRACK = { 95, 100, 112 };
+static const Color C_BAR_USED  = { 70, 130, 230 };
+static const Color C_BAR_NEED  = { 255, 150, 40 };
+static const Color C_BAR_FREE  = { 120, 200, 150 };
+
 enum Mode { MODE_GRID = 0, MODE_CONFIRM, MODE_PROGRESS, MODE_DELETE };
 static Mode g_mode = MODE_GRID;
 static Mode g_deleteFrom = MODE_GRID;      // откуда открыли подтверждение удаления (сетка или окно игры)
@@ -1056,10 +1061,6 @@ static void draw_info_top(const Game& g, int x, int y, int W)
 
 // Полоска занятого места шириной w: серая основа, занято - синее, нужно для игры - оранжевое и толще, дальше свободно -
 // зеленоватое. Под ней подписи. Возвращает занятую высоту.
-static const Color C_BAR_TRACK = { 95, 100, 112 };
-static const Color C_BAR_USED  = { 70, 130, 230 };
-static const Color C_BAR_NEED  = { 255, 150, 40 };
-static const Color C_BAR_FREE  = { 120, 200, 150 };
 
 static int draw_space_info(int x, int y, int w, bool center)
 {
@@ -1165,7 +1166,7 @@ static void draw_confirm()
     int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + (FRAME_HEIGHT - 100 - HEAD_H - H) / 2;
     draw_panel(x, y, W, H);
     draw_info_top(g_sel, x, y, W);
-    int tx = x + 40, ty = y + 30 + COVER_H + 60;
+    int tx = x + 40;
     int maxc = (W - 80) / g_cellW;
 
     if (g_cardReason == CARD_LAUNCH) {   // окно установленной игры: только запуск
