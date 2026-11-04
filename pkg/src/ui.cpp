@@ -1346,6 +1346,15 @@ static void draw_progress()
     draw_hint(hint, x + (W - hint_w(hint)) / 2, y + H - 36, C_TEXT, C_PANEL);
 }
 
+// L1 / R1 в шапке: прямоугольник той же высоты, что и вкладки.
+static const int SHOULDER_TAB_W = 68;
+static void draw_shoulder_tab(const char* label, int x)
+{
+    int h = HEAD_H - 28;
+    fill(x, 14, SHOULDER_TAB_W, h, C_TAB_OFF);
+    draw_text(label, x + (SHOULDER_TAB_W - 2 * g_cellW) / 2, 14 + h / 2 + FONT_PX / 3, C_TEXT, C_TAB_OFF);
+}
+
 static void draw_all()
 {
     g_spinnerSeen = false;
@@ -1357,8 +1366,8 @@ static void draw_all()
     x += (g_logoPng.w > 0 ? g_logoPng.w : 160) + 40;
 
     // Вкладки. Ширина по тексту, активная выделена.
-    draw_pad_icon('L', x, HEAD_H / 2 - ICON_S / 2, C_HEAD);
-    x += icon_w('L') + 20;
+    draw_shoulder_tab("L1", x);
+    x += SHOULDER_TAB_W + 16;
     for (int i = 0; i < TAB_COUNT; i++) {
         std::string name = TAB_NAMES[i];
         int w = text_w(name) + 40;
@@ -1368,7 +1377,7 @@ static void draw_all()
         x += w + 16;
     }
     x += 8;
-    draw_pad_icon('R', x, HEAD_H / 2 - ICON_S / 2, C_HEAD);
+    draw_shoulder_tab("R1", x);
 
     if (g_workerBusy) {
         draw_loading(g_tab == TAB_REQUESTS ? "Загрузка списка запросов..." : "Загрузка списка игр...");
@@ -1412,7 +1421,7 @@ static void draw_all()
     {   // версия и авторы: мелко и темно, в правом нижнем углу
         FT_Set_Pixel_Sizes(g_font, 0, 20);
         int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : 12;
-        std::string ver = std::string("версия ") + APP_VERSION + "   Created by SergioPoverony and Mr. Claude";
+        std::string ver = std::string("версия ") + APP_VERSION + " Created by SergioPoverony and Mr.Claude";
         draw_text(ver, (FRAME_WIDTH - count_cp(ver) * cell) / 2, FRAME_HEIGHT - 8, Color{ 95, 100, 115 }, C_BG);
         FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
     }
