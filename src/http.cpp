@@ -187,6 +187,7 @@ Response route(const Request& rq) {
         std::vector<std::string> ids;
         if (!json_get_string_array(rq.body, "title_ids", &ids) || ids.size() != 1)
             return json_error(400, "bad_request", "ожидается {\"title_ids\":[\"CUSA00000\"]}");
+        if (ids[0] == "OFST00001") return json_error(403, "self", "магазин не может удалить сам себя");
         bool known = false;
         for (const std::string& t : platform::installed_title_ids()) known = known || t == ids[0];
         if (!known) return json_error(404, "not_installed", ids[0]);

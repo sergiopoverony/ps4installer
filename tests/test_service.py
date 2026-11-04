@@ -405,6 +405,7 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.srv.post("/uninstall", {"title_ids": ["CUSA99999"]})[0], 404)   # не установлена
         self.assertEqual(self.srv.post("/uninstall", {"title_ids": ["CUSA00003FAIL"]})[0], 500)
         self.assertEqual(self.srv.post("/uninstall", {"title_ids": ["A", "B"]})[0], 400)
+        self.assertEqual(self.srv.post("/uninstall", {"title_ids": ["OFST00001"]})[0], 403)   # себя удалять нельзя
         self.assertEqual(self.srv.get("/uninstall")[0], 405)
 
     def test_scan_is_cached(self):
