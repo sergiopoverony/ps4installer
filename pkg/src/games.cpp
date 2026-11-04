@@ -108,7 +108,7 @@ int file_rank(const PkgItem& it)
 std::string file_label(const PkgItem& it)
 {
     switch (file_rank(it)) {
-        case 0: return "Игра";
+        case 0: return "Основной файл";
         case 1: return it.ver.empty() ? "Патч" : "Патч " + it.ver;
         case 2: return it.title.empty() ? "DLC" : "DLC: " + it.title;
         default: return "Русификатор";
