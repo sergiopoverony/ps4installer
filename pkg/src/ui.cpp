@@ -11,6 +11,7 @@
 #include "utf8.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <sys/stat.h>
@@ -389,7 +390,7 @@ static const Color C_BAR_USED  = { 70, 130, 230 };
 static const Color C_BAR_NEED  = { 255, 150, 40 };
 static const Color C_BAR_FREE  = { 120, 200, 150 };
 
-enum Mode { MODE_GRID = 0, MODE_CONFIRM, MODE_PROGRESS, MODE_DELETE };
+enum Mode { MODE_GRID = 0, MODE_CONFIRM, MODE_PROGRESS, MODE_DELETE, MODE_OPTIONS };
 static Mode g_mode = MODE_GRID;
 static Mode g_deleteFrom = MODE_GRID;      // откуда открыли подтверждение удаления (сетка или окно игры)
 static std::string g_deleteErr;
@@ -1348,6 +1349,74 @@ static void draw_progress()
     draw_hint(hint, x + (W - hint_w(hint)) / 2, y + H - 36, C_TEXT, C_PANEL);
 }
 
+// ---- Язык интерфейса и меню (кнопка Options)
+static const char* LANG_PATH = "/data/ps4installer_app/lang.txt";
+struct LangItem { const char* code; const char* name; };
+static const LangItem LANGS[] = { { "ru", "Русский" }, { "en", "English" } };
+static const int LANG_N = 2;
+static int g_sysLang = 1;                // номер языка системы
+static std::string g_langChoice;         // выбранный в меню код языка; пусто - язык системы
+static int g_optSub = 0, g_optCur = 0;   // 0 - главное меню, 1 - выбор языка; строка под курсором
+
+// Код языка из lang.txt (только буквы); пусто, если файла нет.
+static std::string lang_saved_read()
+{
+    std::string c;
+    if (FILE* f = fopen(LANG_PATH, "rb")) {
+        char b[32] = {0};
+        size_t n = fread(b, 1, sizeof(b) - 1, f);
+        fclose(f);
+        for (size_t i = 0; i < n; i++) if (b[i] >= 'a' && b[i] <= 'z') c += b[i]; else if (b[i] >= 'A' && b[i] <= 'Z') c += (char)(b[i] + 32);
+    }
+    return c;
+}
+
+static void lang_apply(const std::string& choice, bool save)
+{
+    g_langChoice = choice;
+    std::string code = choice.empty() ? i18n_code_for_system_lang(g_sysLang) : choice;
+    i18n_load("/app0/assets/misc", code);
+    logf_("ui: язык системы %d, выбор %s, язык интерфейса %s", g_sysLang, choice.empty() ? "авто" : choice.c_str(), code.c_str());
+    if (save) {
+        mkdir("/data/ps4installer_app", 0777);
+        if (choice.empty()) remove(LANG_PATH);
+        else if (FILE* f = fopen(LANG_PATH, "wb")) { fprintf(f, "%s\n", choice.c_str()); fclose(f); }
+    }
+}
+
+static void draw_options()
+{
+    const int W = 900, ROW = 70;
+    const bool sub = g_optSub == 1;
+    const int n = sub ? LANG_N + 1 : 4;
+    const int H = 150 + n * ROW + 110;
+    int x = (FRAME_WIDTH - W) / 2, y = (FRAME_HEIGHT - H) / 2;
+    draw_panel(x, y, W, H);
+    std::string title = tr(sub ? "opt.lang_title" : "opt.title");
+    draw_text(title, x + (W - text_w(title)) / 2, y + 70, C_TEXT, C_PANEL);
+    for (int i = 0; i < n; i++) {
+        std::string t;
+        bool dim = false;
+        if (!sub) {
+            t = i == 0 ? tr("opt.language") : i == 3 ? tr("opt.quit") : tr("opt.empty");
+            dim = i == 1 || i == 2;
+        } else if (i == 0) {
+            t = tr("opt.lang_auto");
+            if (g_langChoice.empty()) t = "* " + t;
+        } else {
+            t = LANGS[i - 1].name;
+            if (g_langChoice == LANGS[i - 1].code) t = "* " + t;
+        }
+        int ry = y + 110 + i * ROW;
+        Color bg = i == g_optCur ? C_TAB_ON : C_TILE;
+        fill(x + 40, ry, W - 80, ROW - 10, bg);
+        t = fit_chars(t, (W - 140) / g_cellW);
+        draw_text(t, x + 70, ry + (ROW - 10) / 2 + FONT_PX / 3, dim ? C_DIM : C_TEXT, bg);
+    }
+    std::string h = tr(sub ? "hint.opt_sub" : "hint.opt");
+    draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 40, C_TEXT, C_PANEL);
+}
+
 // L1 / R1 в шапке: прямоугольник той же высоты, что и вкладки.
 static const int SHOULDER_TAB_W = 68;
 static void draw_shoulder_tab(const char* label, int x)
@@ -1398,6 +1467,7 @@ static void draw_all()
 
     if (g_svc == SVC_OK && (g_mode == MODE_CONFIRM || (g_mode == MODE_DELETE && g_deleteFrom == MODE_CONFIRM))) draw_confirm();
     if (g_svc == SVC_OK && g_mode == MODE_DELETE) draw_delete();
+    if (g_mode == MODE_OPTIONS) draw_options();
     if (g_svc == SVC_OK && g_mode == MODE_PROGRESS) draw_progress();
 
     // Идёт установка, а окно скрыто: короткая строка под сеткой
@@ -1473,21 +1543,10 @@ bool ui_init()
         int w = (int)(g_font->glyph->advance.x >> 6);
         if (w > 0) g_cellW = w;
     }
-    {   // язык интерфейса: из настроек системы; для проверок можно записать код языка в /data/ps4installer_app/lang.txt
-        int sysLang = 1;
+    {   // язык интерфейса: выбор в меню (файл lang.txt) или язык системы
         int v = 0;
-        if (sys_param_get_int(2, &v) == 0) sysLang = v;   // 2 - ORBIS_SYSTEM_SERVICE_PARAM_ID_LANG
-        std::string code = i18n_code_for_system_lang(sysLang);
-        if (FILE* f = fopen("/data/ps4installer_app/lang.txt", "rb")) {
-            char b[16] = {0};
-            size_t n = fread(b, 1, sizeof(b) - 1, f);
-            fclose(f);
-            std::string c(b, n);
-            while (!c.empty() && (c.back() == '\n' || c.back() == '\r' || c.back() == ' ')) c.pop_back();
-            if (!c.empty()) code = c;
-        }
-        i18n_load("/app0/assets/misc", code);
-        logf_("ui: язык системы %d, язык интерфейса %s", sysLang, code.c_str());
+        if (sys_param_get_int(1, &v) == 0) g_sysLang = v;   // 1 - ORBIS_SYSTEM_SERVICE_PARAM_ID_LANG
+        lang_apply(lang_saved_read(), false);
     }
     bool padOk = pad_init();
     logf_("ui: ready, cell width %d, pad %s", g_cellW, padOk ? "ok" : "FAILED");
@@ -1641,6 +1700,25 @@ void ui_pump()
     if (dirs) nextRepeat = now + 350000;
     else if ((b & DIRS) && now >= nextRepeat) { dirs = b & DIRS; nextRepeat = now + 110000; }
 
+    if (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_OPTIONS)) { g_mode = MODE_OPTIONS; g_optSub = 0; g_optCur = 0; g_redraw = 2; pressed = 0; dirs = 0; }
+    if (g_mode == MODE_OPTIONS) {
+        const int n = g_optSub == 1 ? LANG_N + 1 : 4;
+        int dy = (dirs & ORBIS_PAD_BUTTON_DOWN ? 1 : 0) - (dirs & ORBIS_PAD_BUTTON_UP ? 1 : 0);
+        if (dy) { g_optCur = (g_optCur + dy + n) % n; g_redraw = 2; }
+        if (pressed & ORBIS_PAD_BUTTON_CIRCLE) {
+            if (g_optSub == 1) { g_optSub = 0; g_optCur = 0; } else g_mode = MODE_GRID;
+            g_redraw = 2;
+        } else if (pressed & ORBIS_PAD_BUTTON_CROSS) {
+            if (g_optSub == 0) {
+                if (g_optCur == 0) { g_optSub = 1; g_optCur = 0; g_redraw = 2; }
+                else if (g_optCur == 3) { logf_("ui: выход из приложения по меню"); exit(0); }
+            } else {
+                lang_apply(g_optCur == 0 ? std::string() : std::string(LANGS[g_optCur - 1].code), true);
+                g_redraw = 2;
+            }
+        }
+        pressed = 0; dirs = 0;   // остальные кнопки под меню не работают
+    }
     int old = g_tab;
     if (g_mode == MODE_GRID) {
         if (pressed & ORBIS_PAD_BUTTON_L1) g_tab = (g_tab + TAB_COUNT - 1) % TAB_COUNT;
