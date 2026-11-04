@@ -1054,7 +1054,6 @@ static std::string job_label(const InstallJob& j)
 
 // ---- Информация об игре из каталога (обложка, 4 скриншота, описание) ----
 static const int COVER_W = 350, COVER_H = 350;
-static const int COMPACT_COVER = 380;   // обложка в узкой карточке без описания
 static const int SHOT_W = 254, SHOT_H = 143, SHOT_GAP = 14, SHOT_N = 4;
 static const CatEntry* g_selCat = nullptr;
 static CatImage g_imgCover;
@@ -1076,7 +1075,7 @@ static void info_load(const Game& g)
     g_selCat = catalog_find(g.title_id, g.title, &how);
     if (!g_selCat) {
         logf_("ui: в каталоге нет %s (%s)", g.title_id.c_str(), g.title.c_str());
-        load_game_image(g, COMPACT_COVER, COMPACT_COVER, g_imgCover);   // хотя бы иконка из самого PKG (описания нет - карточка узкая)
+        load_game_image(g, COVER_W, COVER_H, g_imgCover);   // хотя бы иконка из самого PKG
         return;
     }
     logf_("ui: найдено в каталоге по %s: %s", how, g_selCat->name_en.c_str());
@@ -1085,12 +1084,6 @@ static void info_load(const Game& g)
         catalog_image(g_selCat->shots[(size_t)i], SHOT_W, SHOT_H, g_imgShots[i]);
     if (!g_imgCover.ok()) load_game_image(g, COVER_W, COVER_H, g_imgCover);
     g_selDesc = catalog_text(*g_selCat);
-    bool anyShot = false;
-    for (int i = 0; i < SHOT_N; i++) anyShot = anyShot || g_imgShots[i].ok();
-    if (g_selDesc.empty() && !anyShot) {   // карточка без описания: иконка крупнее
-        g_imgCover = CatImage();
-        if (!catalog_image(g_selCat->cover, COMPACT_COVER, COMPACT_COVER, g_imgCover)) load_game_image(g, COMPACT_COVER, COMPACT_COVER, g_imgCover);
-    }
 }
 
 static void blit(const CatImage& im, int x, int y)
@@ -1190,67 +1183,8 @@ static int draw_space_info(int x, int y, int w, bool center)
     return SPACE_INFO_H;
 }
 
-// Нет ни описания, ни скриншотов: окно почти квадратное. Название сверху, под ним иконка, ниже сведения и кнопки столбиком.
-static bool card_is_compact()
-{
-    if (!g_selDesc.empty()) return false;
-    for (int i = 0; i < SHOT_N; i++) if (g_imgShots[i].ok()) return false;
-    return true;
-}
-
-static void draw_confirm_compact()
-{
-    const int W = 1300;
-    const int H = (g_cardReason == CARD_LAUNCH || g_cardReason == CARD_REQUEST) ? 520 : 590;   // высота как у карточек с описанием
-    bool launch = g_cardReason == CARD_LAUNCH, request = g_cardReason == CARD_REQUEST;
-    bool low = g_cardReason == CARD_OK && g_freeOk && g_selNeed > g_freeBytes;
-    bool can = g_cardReason == CARD_OK && !low;
-    std::string hint;   // все кнопки в одну строку
-    if (launch) hint = is_self(g_sel) ? "{X} - запустить игру    {O} - закрыть" : "{X} - запустить игру    {T} - удалить    {O} - закрыть";
-    else if (request) hint = "{X} - запросить    {O} - закрыть";
-    else {
-        hint = can ? "{X} - установить    {O} - закрыть" : "{X} - установить (недоступно)    {O} - закрыть";
-        if (g_cardReason == CARD_QUEUED) hint += "    {T} - ход установки";
-    }
-    int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + (FRAME_HEIGHT - 100 - HEAD_H - H) / 2;
-    draw_panel(x, y, W, H);
-    int cx = x + 30, cy = y + 30;
-    int cw = g_imgCover.ok() ? g_imgCover.w : COMPACT_COVER, ch = g_imgCover.ok() ? g_imgCover.h : COMPACT_COVER;
-    if (g_imgCover.ok()) blit(g_imgCover, cx, cy);
-    else {
-        fill(cx, cy, cw, ch, C_TILE);
-        std::string l = g_sel.title.empty() ? "?" : g_sel.title.substr(0, 1);
-        const unsigned char* p = (const unsigned char*)g_sel.title.c_str();
-        const unsigned char* st = p;
-        if (*p) { decode_utf8(p); l = std::string((const char*)st, (size_t)(p - st)); }
-        draw_text(l, cx + (cw - g_cellW) / 2, cy + ch / 2 + FONT_PX / 3, C_DIM, C_TILE);
-    }
-    if (!launch && !request) draw_space_info(cx, cy + ch + 24, cw, false);   // полоска - в ширину иконки
-
-    int rx = cx + cw + 30, rw = x + W - 30 - rx;
-    draw_title_fit(g_selCat && !g_selCat->name_en.empty() ? g_selCat->name_en : g_sel.title, rx, cy + TITLE_PX, rw, false, C_PANEL);
-    int by = cy + TITLE_PX + 40;
-    if (!launch && !request) {
-        const char* msg = g_cardReason == CARD_INSTALLED ? "УЖЕ УСТАНОВЛЕНО" : g_cardReason == CARD_INCOMPLETE ? "НЕ ДОКАЧАНО - ДОЖДИТЕСЬ ЗАГРУЗКИ ФАЙЛОВ" :
-                          g_cardReason == CARD_QUEUED ? "УЖЕ В ОЧЕРЕДИ НА УСТАНОВКУ" : low ? "МАЛО МЕСТА - УДАЛИТЕ НЕНУЖНУЮ ИГРУ" : "";
-        if (msg[0]) {
-            Color bg = g_cardReason == CARD_INCOMPLETE || low ? C_RED_BG : g_cardReason == CARD_INSTALLED ? C_GREEN : C_WARN;
-            Color fg = (g_cardReason == CARD_INCOMPLETE || low) ? C_TEXT : C_BG;
-            std::string m = fit_chars(msg, (rw - 20) / g_cellW);
-            fill(rx, by, rw, 52, bg);
-            draw_text(m, rx + (rw - text_w(m)) / 2, by + 36, fg, bg);
-            by += 52 + 18;
-        }
-    }
-    if (!g_confirmErr.empty()) {
-        draw_text(fit_chars(g_confirmErr, rw / g_cellW), rx, by + FONT_PX, g_confirmOk ? C_GREEN : C_WARN, C_PANEL);
-    }
-    draw_hint(hint, rx, y + H - 40, (launch || request || can) ? C_TEXT : C_DIM, C_PANEL);   // внизу, в одну строку
-}
-
 static void draw_confirm()
 {
-    if (card_is_compact()) { draw_confirm_compact(); return; }
     const int W = 1500;   // 30 + обложка 350 + 30 + 4 скриншота с промежутками (4*254+3*14) + 30 = 1478
     const int H = (g_cardReason == CARD_LAUNCH || g_cardReason == CARD_REQUEST) ? 520 : 590;
     // по центру между шапкой и нижней строкой подсказок
