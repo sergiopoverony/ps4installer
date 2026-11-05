@@ -1,5 +1,6 @@
 #include "service.h"
 #include "httpc.h"
+#include "i18n.h"
 #include "json.h"
 #include "log.h"
 #include "net.h"
@@ -123,6 +124,19 @@ bool service_launch(const std::string& titleId, std::string& err)
     JsonValue j;
     if (!json_parse(r.body, j)) { err = "http " + std::to_string(r.status); return false; }
     if (!j["ok"].asBool()) { err = j["detail"].asStr(j["error"].asStr("error")); return false; }
+    return true;
+}
+
+bool service_delete_files(const std::vector<std::string>& paths, std::string& err)
+{
+    std::string body = "{\"paths\":[";
+    for (size_t i = 0; i < paths.size(); i++) body += (i ? "," : "") + json_quote(paths[i]);
+    body += "]}";
+    HttpResult r = http_post(SERVICE_HOST, SERVICE_PORT, "/delete_files", body, 60000);
+    if (!r.connected) { err = tr("err.no_service"); return false; }
+    JsonValue j;
+    if (!json_parse(r.body, j)) { err = "http " + std::to_string(r.status); return false; }
+    if (!j["ok"].asBool()) { err = j["detail"].asStr(j["failed"].asStr(j["error"].asStr("error"))); return false; }
     return true;
 }
 

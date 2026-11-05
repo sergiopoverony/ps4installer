@@ -46,6 +46,8 @@ bool service_app_icon(const std::string& titleId, std::string& png);
 // POST /launch: запуск установленной игры. В err причина отказа.
 bool service_launch(const std::string& titleId, std::string& err);
 // POST /uninstall: удалить установленную игру. В err причина отказа.
+// Физически удаляет .pkg-файлы с носителя (POST /delete_files).
+bool service_delete_files(const std::vector<std::string>& paths, std::string& err);
 bool service_uninstall(const std::string& titleId, std::string& err);
 
 // POST /install. true, если служба приняла очередь. При отказе в err текст причины (detail службы).

@@ -24,6 +24,8 @@
 
 namespace {
 
+std::atomic<bool> g_scan_dirty(false);   // после удаления файлов кэш /scan устарел
+
 std::atomic<bool> g_quit(false);
 int g_listen_fd = -1;
 
@@ -112,6 +114,9 @@ Response route(const Request& rq) {
         int ttl = ttl_env ? atoi(ttl_env) : 30;
         long age = cached.empty() ? 1000000 : (long)std::chrono::duration_cast<std::chrono::seconds>(now - cached_at).count();
         bool usable = ttl > 0 && age < ttl;
+        if (g_scan_dirty.exchange(false)) {
+            usable = false;   // файлы удалили: список сразу пересобираем
+        }
         if (usable && fresh && age >= 3) {
             usable = false;   // «Квадрат»: свежие данные, но не чаще чем раз в 3 секунды
         }
@@ -180,6 +185,25 @@ Response route(const Request& rq) {
         std::string err;
         if (!platform::launch_app(ids[0], &err)) return json_error(500, "launch_failed", err);
         r.body = "{\"ok\":true}";
+        return r;
+    }
+    if (rq.path == "/delete_files") {   // физически удалить .pkg-файлы с носителя (только разрешённые папки и только пока нет установки)
+        if (rq.method != "POST") return json_error(405, "method", "нужен POST");
+        std::vector<std::string> paths;
+        if (!json_get_string_array(rq.body, "paths", &paths) || paths.empty() || paths.size() > 200)
+            return json_error(400, "bad_request", "ожидается {\"paths\":[\"/mnt/usb0/game.pkg\"]}");
+        for (const std::string& p : paths)
+            if (!path_allowed(p)) return json_error(403, "path_not_allowed", p);
+        if (installer::is_busy()) return json_error(409, "busy", "идёт установка: подождите её окончания");
+        int deleted = 0;
+        std::string failed;
+        for (const std::string& p : paths) {
+            log_printf("delete file request: %s", p.c_str());
+            if (remove(p.c_str()) == 0) deleted++;
+            else failed += std::string(failed.empty() ? "" : ",") + json_escape(p);
+        }
+        g_scan_dirty = true;
+        r.body = "{\"ok\":" + std::string(failed.empty() ? "true" : "false") + ",\"deleted\":" + std::to_string(deleted) + ",\"failed\":\"" + failed + "\"}";
         return r;
     }
     if (rq.path == "/uninstall") {

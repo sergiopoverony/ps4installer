@@ -408,6 +408,26 @@ class ServiceTests(unittest.TestCase):
         self.assertEqual(self.srv.post("/uninstall", {"title_ids": ["OFST00001"]})[0], 403)   # себя удалять нельзя
         self.assertEqual(self.srv.get("/uninstall")[0], 405)
 
+    def test_delete_files(self):
+        a = make_pkg(DATA_PKG / "da.pkg", "UP0001-CUSA00201_00-DELETEDELETEDEL1", 0x2000)
+        b = make_pkg(Path(USB_PREFIX + "0") / "db.pkg", "UP0001-CUSA00202_00-DELETEDELETEDEL2", 0x2000)
+        keep = make_pkg(DATA_PKG / "keep.pkg", "UP0001-CUSA00203_00-DELETEDELETEDEL3", 0x2000)
+        self.srv = Server()
+        self.assertEqual(self.srv.post("/delete_files", {"paths": ["/etc/passwd.pkg"]})[0], 403)   # чужая папка
+        self.assertEqual(self.srv.post("/delete_files", {"paths": [a, "/data/pkg/../x.pkg"]})[0], 403)
+        self.assertTrue(os.path.exists(a))   # при отказе не удаляется ничего
+        self.assertEqual(self.srv.post("/delete_files", {"paths": []})[0], 400)
+        self.assertEqual(self.srv.get("/delete_files")[0], 405)
+        self.assertEqual(self.srv.get("/scan")[1]["count"], 3)
+        code, j = self.srv.post("/delete_files", {"paths": [a, b]})
+        self.assertEqual(code, 200, j)
+        self.assertEqual(j["deleted"], 2)
+        self.assertFalse(os.path.exists(a) or os.path.exists(b))
+        self.assertTrue(os.path.exists(keep))
+        self.assertEqual(self.srv.get("/scan?fresh=1")[1]["count"], 1)
+        code, j = self.srv.post("/delete_files", {"paths": [a]})   # уже нет файла
+        self.assertFalse(j["ok"])
+
     def test_scan_is_cached(self):
         a = make_pkg(DATA_PKG / "ca.pkg", "UP0001-CUSA00101_00-CACHECACHECACHE1", 0x2000)
         self.srv = Server(env={"PS4I_SCAN_CACHE_SEC": "30"})

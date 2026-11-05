@@ -1260,12 +1260,16 @@ static void draw_delete()
     int x = (FRAME_WIDTH - W) / 2, y = (FRAME_HEIGHT - H) / 2;
     draw_panel(x, y, W, H);
     int maxc = (W - 80) / g_cellW;
-    std::string q = tr(g_tab == TAB_REQUESTS ? "del.q_request" : "del.q");
+    std::string q = tr(g_tab == TAB_REQUESTS ? "del.q_request" : g_tab == TAB_AVAILABLE ? "del.q_files" : "del.q");
     draw_text(q, x + (W - text_w(q)) / 2, y + 80, C_TEXT, C_PANEL);
     std::string t = fit_chars(g_sel.title, maxc);
     fill(x + 40, y + 120, W - 80, FONT_PX + 24, C_RED_BG);
     draw_text(t, x + (W - text_w(t)) / 2, y + 120 + FONT_PX + 8, C_TEXT, C_RED_BG);
-    if (!g_deleteErr.empty()) draw_text(fit_chars(g_deleteErr, maxc), x + 40, y + 240, C_WARN, C_PANEL);
+    if (g_tab == TAB_AVAILABLE) {
+        std::string info = trf("del.files_info", std::to_string(g_sel.files.size()), fmt_size(g_sel.size));
+        draw_text(fit_chars(info, maxc), x + (W - text_w(fit_chars(info, maxc))) / 2, y + 205, C_DIM, C_PANEL);
+    }
+    if (!g_deleteErr.empty()) draw_text(fit_chars(g_deleteErr, maxc), x + 40, y + 255, C_WARN, C_PANEL);
     std::string h = tr("hint.yesno");
     draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 50, C_TEXT, C_PANEL);
 }
@@ -1789,6 +1793,12 @@ void ui_pump()
             } else if (g_mode == MODE_GRID && g_tab == TAB_AVAILABLE && (pressed & ORBIS_PAD_BUTTON_TRIANGLE) && (g_instActive || g_instFinished)) {
                 g_mode = MODE_PROGRESS;
                 g_redraw = 2;
+            } else if (g_mode == MODE_GRID && g_tab == TAB_AVAILABLE && (pressed & ORBIS_PAD_BUTTON_TRIANGLE) && !g_games.empty()) {
+                g_sel = g_games[(size_t)g_cursor];   // удаление файлов игры с носителя (с подтверждением)
+                g_deleteErr.clear();
+                g_deleteFrom = MODE_GRID;
+                g_mode = MODE_DELETE; g_skipDeleteInput = true;
+                g_redraw = 2;
             }
             if (g_mode == MODE_GRID && g_tab == TAB_CATALOG && (pressed & ORBIS_PAD_BUTTON_TRIANGLE)) { g_stripFocus = !g_stripFocus; g_redraw = 2; }
             if (g_mode == MODE_GRID && g_tab == TAB_CATALOG && (pressed & ORBIS_PAD_BUTTON_L2)) jump_letter(-1);
@@ -1911,6 +1921,21 @@ void ui_pump()
         unsigned dp = g_skipDeleteInput ? 0 : pressed;
         g_skipDeleteInput = false;
         if (dp & ORBIS_PAD_BUTTON_CIRCLE) { g_mode = g_deleteFrom; g_redraw = 2; }
+        else if ((dp & ORBIS_PAD_BUTTON_CROSS) && g_tab == TAB_AVAILABLE) {
+            std::vector<std::string> paths;
+            for (size_t i = 0; i < g_sel.files.size(); i++) paths.push_back(g_sel.files[i].path);
+            std::string err;
+            logf_("ui: удаление файлов игры %s (%d шт.)", g_sel.title.c_str(), (int)paths.size());
+            if (service_delete_files(paths, err)) {
+                g_mode = MODE_GRID;
+                g_freshScan = true;
+                g_load = LS_LOADING;   // перечитать список
+            } else {
+                g_deleteErr = trf("del.fail", err);
+                logf_("ui: удаление файлов не удалось: %s", err.c_str());
+            }
+            g_redraw = 2;
+        }
         else if ((dp & ORBIS_PAD_BUTTON_CROSS) && g_tab == TAB_REQUESTS) {
             if (req_remove(g_sel)) {
                 logf_("ui: запрос удалён из списка: %s", g_sel.title.c_str());
