@@ -651,6 +651,20 @@ static std::vector<std::string> req_read_lines()
     return out;
 }
 
+// Состояние запросов у торрент-клиента (одним обращением).
+static void req_poll_status()
+{
+    std::vector<std::string> hs;
+    for (size_t i = 0; i < g_games.size(); i++) hs.push_back(g_games[i].hash);
+    std::map<std::string, ReqStatus> st = torrents_poll(hs);
+    g_reqStatus.assign(g_games.size(), ReqStatus());
+    for (size_t i = 0; i < g_games.size(); i++) {
+        std::string h = torrents_clean_hash(g_games[i].hash);
+        if (!h.empty() && st.count(h)) g_reqStatus[i] = st[h];
+        else g_reqStatus[i].state = RS_GONE;
+    }
+}
+
 static void load_requests()
 {
     std::vector<std::string> lines = req_read_lines();
@@ -665,17 +679,7 @@ static void load_requests()
         g.listOnly = true;
         g_games.push_back(g);
     }
-    {   // состояние запросов у торрент-клиента (одним обращением)
-        std::vector<std::string> hs;
-        for (size_t i = 0; i < g_games.size(); i++) hs.push_back(g_games[i].hash);
-        std::map<std::string, ReqStatus> st = torrents_poll(hs);
-        g_reqStatus.assign(g_games.size(), ReqStatus());
-        for (size_t i = 0; i < g_games.size(); i++) {
-            std::string h = torrents_clean_hash(g_games[i].hash);
-            if (!h.empty() && st.count(h)) g_reqStatus[i] = st[h];
-            else g_reqStatus[i].state = RS_GONE;
-        }
-    }
+    req_poll_status();
     g_tileImg.clear(); g_tileTried.clear();
     if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
     g_topRow = 0;
@@ -1894,6 +1898,15 @@ void ui_pump()
                 g_redraw = 2;
                 }
             }
+        }
+    }
+
+    if (g_svc == SVC_OK && g_tab == TAB_REQUESTS && g_mode == MODE_GRID && g_load == LS_OK && !g_games.empty()) {
+        static uint64_t lastPoll = 0;   // проценты загрузки обновляются сами, раз в 4 секунды
+        if (now - lastPoll >= 4000000) {
+            lastPoll = now;
+            req_poll_status();
+            g_redraw = 2;
         }
     }
 
