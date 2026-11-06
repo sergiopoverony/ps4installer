@@ -143,7 +143,7 @@ std::string usb_root()
     for (int i = 0; i < 8; i++) {
         std::string p = g_usbBase + "/usb" + std::to_string(i);
         struct stat st;
-        if (stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode) && access(p.c_str(), W_OK) == 0) return p;
+        if (stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return p;   // как у ps4torrent: достаточно, что папка есть; если писать нельзя, это будет видно при сохранении
     }
     return "";
 }

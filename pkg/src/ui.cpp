@@ -1189,21 +1189,14 @@ static void draw_requests()
             }
             if (!st.empty()) draw_text(fit_chars(st, (sx0 - tx - 30) / g_cellW), tx, ty + 44, sc, bg);
         }
-        if (g.size > 0 && g_favFreeOk && g_favTotal > 0) {   // полоска места, как в карточках игр
+        if (g.size > 0 && g_favFreeOk && g_favFree > 0) {   // полоска места, как в карточках игр
             const int bh = 14;
             int by = ty + 11;
-            double total = (double)g_favTotal;
-            double usedF = total - (double)g_favFree;
-            if (usedF < 0) usedF = 0;
-            int usedW = (int)(SPW * usedF / total);
-            double needAvail = (double)g.size < (double)g_favFree ? (double)g.size : (double)g_favFree;
-            int needW = needAvail > 0 ? (int)(SPW * needAvail / total) : 0;
+            bool over = g.size > g_favFree;
+            int needW = g_favFree > 0 ? (int)((double)SPW * (double)(g.size < g_favFree ? g.size : g_favFree) / (double)g_favFree) : 0;
             if (needW < 4) needW = 4;
-            if (usedW + needW > SPW) usedW = SPW - needW;
-            fill(sx0, by, SPW, bh, C_BAR_TRACK);
-            fill(sx0, by, usedW, bh, C_BAR_USED);
-            fill(sx0 + usedW + needW, by, SPW - usedW - needW, bh, C_BAR_FREE);
-            fill(sx0 + usedW, by, needW, bh, C_BAR_NEED);
+            fill(sx0, by, SPW, bh, over ? C_WARN : C_BAR_FREE);   // вся полоска - свободное место, оранжевая часть - сколько займёт игра
+            fill(sx0, by, needW, bh, C_BAR_NEED);
             bool fits = g.size <= g_favFree;
             std::string a1 = trf("space.need", fmt_size(g.size));
             std::string b1 = trf("space.free", fmt_size(g_favFree));
@@ -1295,13 +1288,13 @@ static void blit(const CatImage& im, int x, int y)
 }
 
 // Название игры размером TITLE_PX; если не влезает в maxw - обрезается с «…».
-static void draw_title_fit(const std::string& en, int x, int baseline, int maxw, bool center, Color bg)
+static void draw_title_fit(const std::string& en, int x, int baseline, int maxw, bool center, Color bg, Color fg = C_TEXT)
 {
     FT_Set_Pixel_Sizes(g_font, 0, TITLE_PX);
     int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : g_cellW * TITLE_PX / FONT_PX;
     if (cell < 1) cell = 1;
     std::string t = fit_chars(en, maxw / cell);   // не влезло - обрезаем и ставим «…», размер не меняем
-    draw_text(t, center ? x + (maxw - count_cp(t) * cell) / 2 : x, baseline, C_TEXT, bg);
+    draw_text(t, center ? x + (maxw - count_cp(t) * cell) / 2 : x, baseline, fg, bg);
     FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
 }
 
@@ -1346,11 +1339,16 @@ static void draw_info_top(const Game& g, int x, int y, int W)
 // зеленоватое. Под ней подписи. Возвращает занятую высоту.
 
 static const int SPACE_INFO_H = 14 + 10 + 2 * (DESC_PX + 8);
-static int draw_space_info(int x, int y, int w, bool center)
+static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = false)
 {
     const int needH = 14, barH = 14;   // ровная полоска
     int bt = y + (needH - barH) / 2;
-    if (g_freeOk && g_totalBytes > 0) {
+    if (freeOnly && g_freeOk && g_freeBytes > 0) {   // только свободное место: внутри него видно, сколько займёт игра
+        int needW = g_selNeed > 0 ? (int)((double)w * (double)(g_selNeed < g_freeBytes ? g_selNeed : g_freeBytes) / (double)g_freeBytes) : 0;
+        if (g_selNeed > 0 && needW < 4) needW = 4;
+        fill(x, bt, w, barH, g_selNeed > g_freeBytes ? C_WARN : C_BAR_FREE);
+        fill(x, bt, needW, barH, C_BAR_NEED);
+    } else if (g_freeOk && g_totalBytes > 0) {
         double total = (double)g_totalBytes;
         double usedF = total - (double)g_freeBytes;
         if (usedF < 0) usedF = 0;
@@ -1396,21 +1394,17 @@ static void draw_confirm()
     if (g_cardReason == CARD_REQUEST || g_cardReason == CARD_FAV) {
         // Под обложкой - размер игры и место (как в «Доступных»); справа - вопрос или причина, внизу - кнопки.
         int sx = x + 30, sy = y + 30 + COVER_H + 24;
-        draw_space_info(sx, sy, COVER_W, false);
+        draw_space_info(sx, sy, COVER_W, false, true);
         int bx = x + 30 + COVER_W + 30, bw = W - (bx - x) - 30, by = sy;
-        int mc = bw / g_cellW;
+        const int L1 = by + TITLE_PX + 10, L2 = L1 + TITLE_PX + 22;   // две строки по центру, шрифт как у названия игры
         std::string h;
         if (g_cardReason == CARD_REQUEST) {   // из каталога: только в избранное, ничего не запускается
-            if (!g_favDone && g_selNeed > 0 && g_freeOk && g_selNeed > g_freeBytes) {
-                fill(bx, by, bw, 52, C_RED_BG);
-                std::string m = tr("card.lowspace");
-                draw_text(m, bx + (bw - text_w(m)) / 2, by + 36, C_TEXT, C_RED_BG);
-            }
-            if (!g_confirmErr.empty()) draw_text(fit_chars(g_confirmErr, mc), bx, by + 100, g_confirmOk ? C_GREEN : C_WARN, C_PANEL);
+            if (!g_confirmErr.empty()) draw_title_fit(g_confirmErr, bx, L1, bw, true, C_PANEL, g_confirmOk ? C_GREEN : C_WARN);
+            else if (!g_favDone && g_selNeed > 0 && g_freeOk && g_selNeed > g_freeBytes) draw_title_fit(tr("card.lowspace"), bx, L1, bw, true, C_PANEL, C_WARN);
             h = tr(g_favDone ? "hint.fav_close" : "hint.fav_add");
         } else {                              // из избранного: что делать, зависит от условий
-            std::string q;
-            Color qc = C_TEXT;
+            std::string q, q2;
+            Color qc = C_TEXT, q2c = C_DIM;
             if (g_favDone) {
                 h = tr("hint.fav_close");
             } else if (g_favCase == FC_ACTIVE) {
@@ -1425,14 +1419,12 @@ static void draw_confirm()
                 q = tr("card.lowspace"); qc = C_WARN; h = tr("hint.fav_close");
             } else {
                 q = tr("fav.usb_ask");
-                h = tr(g_favUsb.empty() ? "hint.fav_close" : "hint.fav_yes");
+                if (g_favUsb.empty()) { q2 = tr("fav.usb_none"); q2c = C_WARN; h = tr("hint.fav_close"); }
+                else { q2 = tr("fav.offline"); h = tr("hint.fav_yes"); }
             }
-            if (!q.empty()) draw_text(fit_chars(q, mc), bx, by + 36, qc, C_PANEL);
-            if (!g_favDone && g_favCase == FC_USB) {
-                draw_text(fit_chars(tr("fav.offline"), mc), bx, by + 80, C_DIM, C_PANEL);
-                if (g_favUsb.empty()) draw_text(fit_chars(tr("fav.usb_none"), mc), bx, by + 124, C_WARN, C_PANEL);
-            }
-            if (!g_confirmErr.empty()) draw_text(fit_chars(g_confirmErr, mc), bx, by + 36, g_confirmOk ? C_GREEN : C_WARN, C_PANEL);
+            if (!q.empty()) draw_title_fit(q, bx, L1, bw, true, C_PANEL, qc);
+            if (!q2.empty()) draw_title_fit(q2, bx, L2, bw, true, C_PANEL, q2c);
+            if (!g_confirmErr.empty()) draw_title_fit(g_confirmErr, bx, L1, bw, true, C_PANEL, g_confirmOk ? C_GREEN : C_WARN);
         }
         draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
         return;
