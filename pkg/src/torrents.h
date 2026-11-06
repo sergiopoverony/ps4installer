@@ -31,3 +31,19 @@ std::map<std::string, ReqStatus> torrents_poll(const std::vector<std::string>& h
 
 // Хэш в нижний регистр; "" если это не 40 символов hex.
 std::string torrents_clean_hash(const std::string& h);
+
+// Есть ли выход в интернет (пробное подключение к нескольким публичным адресам).
+bool net_online(int timeout_ms);
+
+// Первая подключённая USB-флешка, в которую можно писать: "/mnt/usbN"; "" если нет.
+std::string usb_root();
+
+// Только для проверок: каталог, где лежат usb0..usb7 (по умолчанию /mnt).
+void torrents_set_usb_base(const std::string& base);
+
+// Имя файла со ссылкой: Имя_игры_ID_magnet.txt (только латиница, цифры, '_', '-', '.').
+std::string torrents_magnet_filename(const std::string& title, const std::string& id);
+
+// Записывает magnet-ссылку в корень носителя root (файл Имя_игры_ID_magnet.txt). В path - полный путь записанного файла.
+bool torrents_save_usb(const std::string& root, const std::string& hash, const std::string& title, const std::string& id,
+                       std::string& path, std::string& err);

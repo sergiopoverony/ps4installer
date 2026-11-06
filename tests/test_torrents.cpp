@@ -63,6 +63,29 @@ int main(int argc, char** argv)
     st = torrents_poll(hs);
     CHECK(st[L2].state == RS_NOSVC);
     CHECK(torrents_request(L1, "Game One", err) && torrents_poll(hs)[L1].state == RS_WAIT);   // ожидающие видны и без клиента
+
+    // имя файла magnet и запись на «флешку»
+    CHECK(torrents_magnet_filename("Fallout 4: GOTY / ReMOD", "CUSA02557") == "Fallout_4_GOTY_ReMOD_CUSA02557_magnet.txt");
+    CHECK(torrents_magnet_filename("\xd0\x98\xd0\xb3\xd1\x80\xd0\xb0", "") == "game_magnet.txt");
+    {
+        std::string base = root + "/mnt";
+        mkdir(base.c_str(), 0777);
+        torrents_set_usb_base(base);
+        CHECK(usb_root().empty());                     // флешки нет
+        mkdir((base + "/usb1").c_str(), 0777);
+        CHECK(usb_root() == base + "/usb1");
+        std::string path, e2;
+        CHECK(torrents_save_usb(usb_root(), L1, "Game One", "CUSA00001", path, e2));
+        CHECK(path == base + "/usb1/Game_One_CUSA00001_magnet.txt");
+        FILE* f = fopen(path.c_str(), "rb");
+        CHECK(f != nullptr);
+        char buf[512] = {0};
+        size_t n = f ? fread(buf, 1, sizeof(buf) - 1, f) : 0;
+        if (f) fclose(f);
+        CHECK(n > 0 && std::string(buf, n).compare(0, 20, "magnet:?xt=urn:btih:") == 0);
+        CHECK(!torrents_save_usb(usb_root(), "bad", "G", "X", path, e2));
+        CHECK(!torrents_save_usb("", L1, "G", "X", path, e2));
+    }
     printf("ok\n");
     return 0;
 }

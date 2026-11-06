@@ -123,3 +123,61 @@ std::map<std::string, ReqStatus> torrents_poll(const std::vector<std::string>& h
     }
     return out;
 }
+
+bool net_online(int timeout_ms)
+{
+    static const char* hosts[] = { "1.1.1.1", "8.8.8.8", "9.9.9.9" };
+    for (size_t i = 0; i < sizeof(hosts) / sizeof(hosts[0]); i++) {
+        HttpResult r = http_get(hosts[i], 80, "/", timeout_ms);
+        if (r.connected) return true;
+    }
+    return false;
+}
+
+static std::string g_usbBase = "/mnt";
+
+void torrents_set_usb_base(const std::string& base) { g_usbBase = base; }
+
+std::string usb_root()
+{
+    for (int i = 0; i < 8; i++) {
+        std::string p = g_usbBase + "/usb" + std::to_string(i);
+        struct stat st;
+        if (stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode) && access(p.c_str(), W_OK) == 0) return p;
+    }
+    return "";
+}
+
+std::string torrents_magnet_filename(const std::string& title, const std::string& id)
+{
+    std::string n;
+    for (size_t i = 0; i < title.size() && n.size() < 80; i++) {
+        unsigned char c = (unsigned char)title[i];
+        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-' || c == '.') n += (char)c;
+        else if (!n.empty() && n[n.size() - 1] != '_') n += '_';
+    }
+    while (!n.empty() && n[n.size() - 1] == '_') n.erase(n.size() - 1);
+    if (n.empty()) n = "game";
+    std::string i2;
+    for (size_t i = 0; i < id.size(); i++) {
+        unsigned char c = (unsigned char)id[i];
+        if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-') i2 += (char)c;
+    }
+    return n + (i2.empty() ? "" : "_" + i2) + "_magnet.txt";
+}
+
+bool torrents_save_usb(const std::string& root, const std::string& hash, const std::string& title, const std::string& id,
+                       std::string& path, std::string& err)
+{
+    std::string h = torrents_clean_hash(hash);
+    if (h.empty()) { err = "bad hash"; return false; }
+    if (root.empty()) { err = "no usb"; return false; }
+    path = root + "/" + torrents_magnet_filename(title, id);
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) { err = "write"; return false; }
+    std::string m = torrents_magnet(h, title) + "\n";
+    bool ok = fwrite(m.data(), 1, m.size(), f) == m.size();
+    if (fclose(f) != 0) ok = false;
+    if (!ok) { err = "write"; return false; }
+    return true;
+}

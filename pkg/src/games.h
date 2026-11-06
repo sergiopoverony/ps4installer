@@ -14,6 +14,7 @@ struct Game {
     bool incomplete = false;      // хотя бы один файл докачан не до конца
     bool installed = false;       // уже стоит на консоли
     bool listOnly = false;        // запись вкладки «Каталог игр»: игры нет ни на диске, ни на консоли
+    bool usbOnly = false;         // вкладка «Избранное»: ссылка magnet сохранена на USB, загрузка не запускалась
     bool console = false;         // запись вкладки «Установленные игры»: берётся с консоли, а не из PKG
     std::vector<PkgItem> files;   // все файлы этой игры (сама игра, патчи, DLC, русификаторы)
 };

@@ -400,6 +400,11 @@ static std::string g_deleteErr;
 static Game g_sel;                         // выбранная игра
 static std::vector<PkgItem> g_selFiles;    // что будет установлено (по порядку)
 static uint64_t g_selNeed = 0, g_freeBytes = 0;
+// Окно «В избранное» из каталога: что можно сделать в зависимости от условий (интернет, торрент-клиент, место, USB).
+enum FavCase { FC_DOWNLOAD = 0, FC_NO_CLIENT, FC_LOW_SPACE, FC_USB };
+static FavCase g_favCase = FC_DOWNLOAD;
+static bool g_favDone = false;   // действие выполнено, окно можно только закрыть
+static std::string g_favUsb;   // корень флешки (пусто - флешки нет)
 static bool g_freeOk = false;
 static uint64_t g_totalBytes = 0;          // полный размер диска (0 - неизвестен)
 static std::string g_confirmErr;           // отказ службы при запуске установки
@@ -602,6 +607,7 @@ static void load_catalog_list()
         g.title = e->name_en;
         g.title_id = e->title_id;
         g.hash = e->hash;
+        g.size = (uint64_t)(e->size_mb > 0 ? e->size_mb : 0) * 1048576ULL;
         g.rus = (e->ru || e->voice) ? 1 : 0;
         g.patches = e->fix ? 1 : 0;
         g.dlcs = e->dlc ? 1 : 0;
@@ -651,12 +657,41 @@ static std::vector<std::string> req_read_lines()
     return out;
 }
 
+static std::vector<std::string> split_tabs(const std::string& line)
+{
+    std::vector<std::string> out;
+    size_t i = 0;
+    while (true) {
+        size_t k = line.find('\t', i);
+        if (k == std::string::npos) { out.push_back(line.substr(i)); break; }
+        out.push_back(line.substr(i, k - i));
+        i = k + 1;
+    }
+    return out;
+}
+
+static bool g_availDirty = false;     // игра скачалась: список «Доступные игры» надо перечитать
+static uint64_t g_favFree = 0, g_favTotal = 0;
+static bool g_favFreeOk = false;
+
+// Запоминает, что у каких раздач завершилось; когда раздача докачалась, помечает «Доступные» устаревшими.
+static void req_note_states(const std::map<std::string, ReqStatus>& st)
+{
+    static std::map<std::string, int> last;
+    for (std::map<std::string, ReqStatus>::const_iterator it = st.begin(); it != st.end(); ++it) {
+        std::map<std::string, int>::iterator p = last.find(it->first);
+        if (p != last.end() && p->second != RS_DONE && it->second.state == RS_DONE) g_availDirty = true;
+        last[it->first] = it->second.state;
+    }
+}
+
 // Состояние запросов у торрент-клиента (одним обращением).
 static void req_poll_status()
 {
     std::vector<std::string> hs;
-    for (size_t i = 0; i < g_games.size(); i++) hs.push_back(g_games[i].hash);
+    for (size_t i = 0; i < g_games.size(); i++) if (!g_games[i].usbOnly) hs.push_back(g_games[i].hash);
     std::map<std::string, ReqStatus> st = torrents_poll(hs);
+    req_note_states(st);
     g_reqStatus.assign(g_games.size(), ReqStatus());
     for (size_t i = 0; i < g_games.size(); i++) {
         std::string h = torrents_clean_hash(g_games[i].hash);
@@ -670,15 +705,17 @@ static void load_requests()
     std::vector<std::string> lines = req_read_lines();
     g_games.clear();
     for (size_t i = 0; i < lines.size(); i++) {
-        size_t t = lines[i].find('\t');
+        std::vector<std::string> f = split_tabs(lines[i]);   // Title ID, название, хэш, размер в МБ, "u" - ссылка сохранена на USB
         Game g;
-        g.title_id = t == std::string::npos ? "" : lines[i].substr(0, t);
-        g.title = t == std::string::npos ? lines[i] : lines[i].substr(t + 1);
-        size_t t2 = g.title.find('\t');   // третье поле - хэш раздачи
-        if (t2 != std::string::npos) { g.hash = g.title.substr(t2 + 1); g.title = g.title.substr(0, t2); }
+        g.title_id = f.size() > 1 ? f[0] : "";
+        g.title = f.size() > 1 ? f[1] : f[0];
+        if (f.size() > 2) g.hash = f[2];
+        if (f.size() > 3) g.size = (uint64_t)atoll(f[3].c_str()) * 1048576ULL;
+        g.usbOnly = f.size() > 4 && f[4] == "u";
         g.listOnly = true;
         g_games.push_back(g);
     }
+    g_favFreeOk = service_free(g_favFree, &g_favTotal);
     req_poll_status();
     g_tileImg.clear(); g_tileTried.clear();
     if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
@@ -1043,6 +1080,8 @@ static void draw_letter_strip()
     }
 }
 
+static void draw_bar(int x, int y, int w, int h, int pct, Color c);
+
 static void draw_requests()
 {
     if (g_load == LS_LOADING || g_load == LS_NONE) { draw_loading(tr("req.loading")); return; }
@@ -1086,7 +1125,19 @@ static void draw_requests()
                 case RS_NOSVC: st = tr("req.st_nosvc"); sc = C_WARN; break;
                 default: st = tr("req.st_gone"); break;
             }
-            draw_text(fit_chars(st, (w - REQ_ICON - 28 - 60) / g_cellW), tx, ty + 44, sc, bg);
+            if (g.usbOnly) { st = tr("req.st_usb"); sc = C_DIM; }
+            draw_text(fit_chars(st, (w - REQ_ICON - 28 - 400) / g_cellW), tx, ty + 44, sc, bg);
+        }
+        if (g.size > 0) {   // размер игры и полоска «сколько это от свободного места»
+            std::string sz = fmt_size(g.size);
+            bool fits = !g_favFreeOk || g.size <= g_favFree;
+            int rx = MARGIN_X + w - 20;
+            draw_text(sz, rx - text_w(sz), ty + 44, fits ? C_DIM : C_WARN, bg);
+            if (g_favFreeOk && g_favFree > 0) {
+                int bw = 260, bx = rx - bw - text_w(sz) - 24;
+                int pct = (int)(g.size >= g_favFree ? 100 : (double)g.size * 100.0 / (double)g_favFree);
+                draw_bar(bx, ty + 44 - 18, bw, 16, pct < 1 ? 1 : pct, fits ? C_BAR_FREE : C_BAR_NEED);
+            }
         }
     }
 }
@@ -1268,9 +1319,35 @@ static void draw_confirm()
         return;
     }
 
-    if (g_cardReason == CARD_REQUEST) {   // игра из каталога: запросить
-        if (!g_confirmErr.empty()) draw_text(fit_chars(g_confirmErr, maxc), tx, y + H - 130 + 36, g_confirmOk ? C_GREEN : C_WARN, C_PANEL);
-        std::string h = tr("hint.request");
+    if (g_cardReason == CARD_REQUEST) {   // игра из каталога: в избранное (что именно - зависит от условий)
+        int qy = y + H - 150;
+        std::string q, h;
+        Color qc = C_TEXT;
+        if (g_favDone) {
+            h = tr("hint.fav_close");
+        } else if (g_favCase == FC_DOWNLOAD) {
+            q = tr("fav.ask_download");
+            h = tr("hint.fav_yes");
+        } else if (g_favCase == FC_NO_CLIENT) {
+            q = tr("fav.no_client"); qc = C_WARN;
+            h = tr("hint.fav_close");
+        } else if (g_favCase == FC_LOW_SPACE) {
+            q = trf("fav.lowspace", fmt_size(g_selNeed), fmt_size(g_freeBytes)); qc = C_WARN;
+            h = tr("hint.fav_close");
+        } else {
+            q = tr("fav.usb_ask");
+            h = tr(g_favUsb.empty() ? "hint.fav_close" : "hint.fav_yes");
+        }
+        if (!q.empty()) draw_text(fit_chars(q, maxc), tx, qy, qc, C_PANEL);
+        if (!g_favDone && g_favCase == FC_USB) {
+            draw_text(fit_chars(tr("fav.offline"), maxc), tx, qy + 44, C_DIM, C_PANEL);
+            if (g_favUsb.empty()) draw_text(fit_chars(tr("fav.usb_none"), maxc), tx, qy + 88, C_WARN, C_PANEL);
+        } else if (!g_favDone && g_favCase == FC_DOWNLOAD && g_selNeed > 0) {
+            std::string sz = trf("space.need", fmt_size(g_selNeed));
+            if (g_freeOk) sz += "     " + trf("space.free", fmt_size(g_freeBytes));
+            draw_text(fit_chars(sz, maxc), tx, qy + 44, C_DIM, C_PANEL);
+        }
+        if (!g_confirmErr.empty()) draw_text(fit_chars(g_confirmErr, maxc), tx, qy + 44, g_confirmOk ? C_GREEN : C_WARN, C_PANEL);
         draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
         return;
     }
@@ -1687,23 +1764,20 @@ static void strip_step(int dir)
         if (g_letterHas[k]) { goto_letter(k); return; }
 }
 
-// Запрос игры: пока просто записываем в /data/ps4installer_app/requests.txt (Title ID и название), без повторов.
-static bool request_game(const Game& g, std::string& msg)
+// В избранное: строка в /data/ps4installer_app/requests.txt (Title ID, название, хэш, размер в МБ, "u" - magnet на USB), без повторов.
+// usb=false: ещё и запрос в ps4torrent (файл <хэш>.magnet, дальше качает он); usb=true: загрузка не запускается, ссылка уже на флешке.
+static bool request_game(const Game& g, std::string& msg, bool usb)
 {
     const char* path = REQ_PATH;
-    std::string line = g.title_id + "\t" + g.title;
-    if (!g.hash.empty()) {   // настоящий запрос: файл <хэш>.magnet в папке торрентов, дальше работает ps4torrent
+    std::string line = g.title_id + "\t" + g.title + "\t" + g.hash + "\t" + std::to_string((unsigned long long)(g.size / 1048576ULL)) + (usb ? "\tu" : "");
+    if (!usb && !g.hash.empty()) {
         std::string err;
         if (!torrents_request(g.hash, g.title, err)) { msg = tr("req.fail_write") + std::string(": ") + err; return false; }
-        line += "\t" + g.hash;
     }
-    std::string all;
-    if (FILE* f = fopen(path, "rb")) {
-        char buf[4096]; size_t n;
-        while ((n = fread(buf, 1, sizeof(buf), f)) > 0) all.append(buf, n);
-        fclose(f);
-    }
-    if (all.find(line + "\n") != std::string::npos) { msg = tr("req.already"); return true; }
+    std::vector<std::string> lines = req_read_lines();
+    std::string key = g.title_id + "\t" + g.title;
+    for (size_t i = 0; i < lines.size(); i++)
+        if (lines[i] == key || lines[i].compare(0, key.size() + 1, key + "\t") == 0) { msg = tr("req.already"); return true; }
     mkdir("/data/ps4installer_app", 0777);
     FILE* f = fopen(path, "ab");
     if (!f) { msg = tr("req.fail_write"); return false; }
@@ -1711,6 +1785,23 @@ static bool request_game(const Game& g, std::string& msg)
     fclose(f);
     msg = tr("req.saved");
     return true;
+}
+
+// Что предложить в окне «В избранное»: качать, сообщить про клиент / место или сохранить magnet на USB (нет сети).
+static void fav_case_compute()
+{
+    g_favUsb.clear();
+    if (!net_online(1000)) { g_favCase = FC_USB; g_favUsb = usb_root(); return; }
+    std::vector<std::pair<std::string, std::string> > inst;
+    bool client = true;   // список не получили - не мешаем
+    if (service_installed_games(inst)) {
+        client = false;
+        for (size_t i = 0; i < inst.size(); i++) if (inst[i].first == "BREW00088") client = true;
+    }
+    if (!client) { g_favCase = FC_NO_CLIENT; return; }
+    g_selNeed = g_sel.size;
+    g_freeOk = service_free(g_freeBytes, &g_totalBytes);
+    g_favCase = (g_freeOk && g_selNeed > 0 && g_selNeed > g_freeBytes) ? FC_LOW_SPACE : FC_DOWNLOAD;
 }
 
 static void present_frame()
@@ -1819,10 +1910,11 @@ void ui_pump()
     }
     if (g_svc == SVC_OK && (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED || g_tab == TAB_CATALOG)) {
         bool isAvail = g_tab == TAB_AVAILABLE;
-        bool wantLoad = (isAvail ? first : g_load == LS_NONE) || (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_SQUARE));
+        bool availDirty = isAvail && g_availDirty && g_mode == MODE_GRID && g_load != LS_LOADING;
+        bool wantLoad = (isAvail ? first : g_load == LS_NONE) || availDirty || (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_SQUARE));
         if (wantLoad && g_load != LS_LOADING) {
             g_freshScan = isAvail && !first;
-            if (isAvail) first = false;
+            if (isAvail) { first = false; g_availDirty = false; }
             g_load = LS_LOADING;
             g_redraw = 2;
         }
@@ -1860,6 +1952,8 @@ void ui_pump()
                 g_cardReason = CARD_REQUEST;
                 g_confirmErr.clear();
                 g_confirmOk = false;
+                fav_case_compute();
+                g_favDone = false;
                 info_load(g_sel);
                 g_mode = MODE_CONFIRM;
                 g_skipConfirmInput = true;
@@ -1898,6 +1992,29 @@ void ui_pump()
                 g_redraw = 2;
                 }
             }
+        }
+    }
+
+    if (g_mode == MODE_CONFIRM && g_cardReason == CARD_REQUEST && g_favCase == FC_USB && !g_favDone) {   // флешку можно вставить, пока окно открыто
+        static uint64_t lastUsb = 0;
+        if (now - lastUsb >= 1000000) {
+            lastUsb = now;
+            std::string u = usb_root();
+            if (u != g_favUsb) { g_favUsb = u; g_redraw = 2; }
+        }
+    }
+
+    if (g_svc == SVC_OK && g_tab != TAB_REQUESTS && g_mode == MODE_GRID) {   // скачалась ли игра из избранного (чтобы обновить «Доступные»)
+        static uint64_t lastWatch = 0;
+        if (now - lastWatch >= 20000000) {
+            lastWatch = now;
+            std::vector<std::string> hs;
+            std::vector<std::string> lines = req_read_lines();
+            for (size_t i = 0; i < lines.size(); i++) {
+                std::vector<std::string> f = split_tabs(lines[i]);
+                if (f.size() > 2 && !(f.size() > 4 && f[4] == "u") && !torrents_clean_hash(f[2]).empty()) hs.push_back(f[2]);
+            }
+            if (!hs.empty()) req_note_states(torrents_poll(hs));
         }
     }
 
@@ -1943,8 +2060,19 @@ void ui_pump()
             g_redraw = 2;
         }
         else if ((cp & ORBIS_PAD_BUTTON_CROSS) && g_cardReason == CARD_REQUEST) {
-            g_confirmOk = request_game(g_sel, g_confirmErr);
-            logf_("ui: запрос игры %s: %s", g_sel.title_id.c_str(), g_confirmErr.c_str());
+            if (!g_confirmOk && g_favCase == FC_DOWNLOAD) {
+                g_confirmOk = request_game(g_sel, g_confirmErr, false);
+                g_favDone = g_confirmOk;
+            } else if (!g_confirmOk && g_favCase == FC_USB && !g_favUsb.empty()) {
+                std::string path, err;
+                if (torrents_save_usb(g_favUsb, g_sel.hash, g_sel.title, g_sel.title_id, path, err)) {
+                    request_game(g_sel, g_confirmErr, true);
+                    g_confirmErr = trf("fav.usb_saved", path.substr(path.rfind('/') + 1), "");
+                    g_confirmOk = true;
+                    g_favDone = true;
+                } else g_confirmErr = tr("req.fail_write") + std::string(": ") + err;
+            }
+            logf_("ui: в избранное %s: %s", g_sel.title_id.c_str(), g_confirmErr.c_str());
             g_redraw = 2;
         }
         else if ((cp & ORBIS_PAD_BUTTON_CROSS) && g_cardReason == CARD_LAUNCH) {
