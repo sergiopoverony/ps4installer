@@ -51,6 +51,7 @@ class MergeTest(unittest.TestCase):
                 row("Alpha Game", "CUSA00010", H("b"), ru="", date="2024-01-01"),                      # новее, но без русского: проигрывает
                 row("Beta The Game 2 Deluxe Edition", "CUSA55555", H("c"), voice="Да", dlc="Да", fix="Да", size="2,0"),   # по названию (другой регион)
                 row("Zeta", "CUSA77777", H("d"), ru="Да", desc="About Zeta", cover=cover, shots=s1 + " " + s2),            # вне каталога, с картинками
+                row("Gamma Special Cut", "CUSA99999", H("9")),                                           # игра + слова -> к Gamma, не отдельной записью
                 row("Omega", "", H("e")),                                                                # вне каталога, без кода и картинок
                 row("Broken", "CUSA88888", H("f"), cover="file:///nonexistent.jpg"),                    # картинка не качается: игра остаётся без неё
             ]
@@ -59,13 +60,14 @@ class MergeTest(unittest.TestCase):
 
             logs = []
             st = M.merge(td, td / "t.csv", media=True, log=logs.append)
-            self.assertEqual((st["catalog"], st["with_torrent"], st["by_code"], st["by_name"], st["extras"], st["extras_with_cover"]), (3, 2, 1, 1, 3, 1))
+            self.assertEqual((st["catalog"], st["with_torrent"], st["by_code"], st["by_name"], st["extras"], st["extras_with_cover"]), (3, 3, 1, 2, 3, 1))
             doc = json.loads((td / "catalog.json").read_text(encoding="utf-8"))
             g = {x["id"]: x for x in doc["games"]}
+            self.assertEqual(g["c"]["th"], H("9"))
             self.assertEqual(g["a"]["th"], H("a"))                       # русская раздача выбрана вместо новой без русского
             self.assertEqual((g["a"]["tu"], g["a"]["tv"], g["a"]["td"]), (1, 0, 0))
             self.assertEqual((g["b"]["th"], g["b"]["tv"], g["b"]["td"], g["b"]["tf"], g["b"]["ts"]), (H("c"), 1, 1, 1, 2048))
-            self.assertNotIn("th", g["c"])
+            self.assertEqual(g["c"]["th"], H("9")) if False else self.assertEqual(g["c"]["th"], H("9"))
             ex = {x["n"]: x for x in doc["games"] if x.get("x")}
             self.assertEqual(sorted(ex), ["Broken", "Omega", "Zeta"])
             z = ex["Zeta"]

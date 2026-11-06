@@ -38,7 +38,15 @@ STOP = {"the", "edition", "editions", "definitive", "deluxe", "complete", "remas
 FIELDS = ("th", "tu", "tv", "td", "tf", "tb", "ts")
 
 
+def tokens(s):
+    return _norm(s)
+
+
 def norm(s):
+    return "".join(_norm(s))
+
+
+def _norm(s):
     """Название -> ключ для сравнения (без регистра, знаков, 'Deluxe', римских цифр)."""
     s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s if not unicodedata.combining(c))
@@ -54,7 +62,7 @@ def norm(s):
         if x.isdigit() and out and out[-1] == x:
             continue
         out.append(x)
-    return "".join(out)
+    return out
 
 
 def yes(v):
@@ -198,6 +206,29 @@ def merge(data_dir, table_path, media=True, log=print):
             n_code += 1
         else:
             n_name += 1
+
+    # третий проход: раздача называется «Игра + 1-2 слова» (reMod, Anniversary и т.п.), а игра Sony ещё без раздачи -> тоже она.
+    # Так у игры остаётся оригинальная обложка из PS Store, а не отдельная запись с обложкой из торрента.
+    free = [(tokens(g["n"]), g) for g in games if "th" not in g and len(norm(g["n"])) >= 5]
+    n_pref = 0
+    for r in sorted((x for x in table if id(x) not in used), key=rank, reverse=True):
+        if id(r) in used:
+            continue
+        tr = tokens(r["Название"])
+        best = None
+        for tg, g in free:
+            if "th" in g or len(tr) <= len(tg) or len(tr) - len(tg) > 2 or tr[:len(tg)] != tg:
+                continue
+            if any(t.isdigit() for t in tr[len(tg):]):
+                continue
+            if best is None or len(tg) > len(best[0]):
+                best = (tg, g)
+        if best:
+            same = [x for x in table if id(x) not in used and tokens(x["Название"]) == tr]
+            best[1].update(fields_of(sorted(same, key=rank, reverse=True)[0]))
+            used.update(id(x) for x in same)
+            n_pref += 1
+    n_name += n_pref
 
     # раздачи без пары в каталоге магазина: отдельные игры, по одной лучшей на игру
     rest = {}
