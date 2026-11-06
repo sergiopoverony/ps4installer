@@ -23,6 +23,7 @@
 
 static std::vector<CatEntry> g_entries;
 static std::string g_pakPath;
+static bool g_hasTorrents = false;
 
 static bool read_file(const std::string& path, std::string& out)
 {
@@ -48,6 +49,7 @@ static CatRef ref_of(const JsonValue& v)
 bool catalog_load(const std::string& dir)
 {
     g_entries.clear();
+    g_hasTorrents = false;
     std::string text;
     if (!read_file(dir + "/catalog.json", text)) { logf_("catalog: нет %s/catalog.json", dir.c_str()); return false; }
     JsonValue j;
@@ -67,6 +69,14 @@ bool catalog_load(const std::string& dir)
         e.desc = ref_of(g["d"]);
         const JsonValue& s = g["s"];
         for (size_t k = 0; k < s.arr.size(); k++) e.shots.push_back(ref_of(s.arr[k]));
+        e.hash = g["th"].asStr();
+        e.ru = (int)g["tu"].asInt();
+        e.voice = (int)g["tv"].asInt();
+        e.dlc = (int)g["td"].asInt();
+        e.fix = (int)g["tf"].asInt();
+        e.backport = (int)g["tb"].asInt();
+        e.size_mb = (int)g["ts"].asInt();
+        if (!e.hash.empty()) g_hasTorrents = true;
         g_entries.push_back(e);
     }
     g_pakPath = dir + "/catalog.pak";
@@ -75,6 +85,7 @@ bool catalog_load(const std::string& dir)
 }
 
 int catalog_count() { return (int)g_entries.size(); }
+bool catalog_has_torrents() { return g_hasTorrents; }
 const CatEntry* catalog_at(int i) { return (i >= 0 && i < (int)g_entries.size()) ? &g_entries[(size_t)i] : nullptr; }
 
 const CatEntry* catalog_by_title_id(const std::string& title_id)

@@ -17,6 +17,11 @@ int main(int argc, char** argv)
     CHECK(e->name_ru == "\xD0\xA2\xD0\xB5\xD1\x81\xD1\x82");   // «Тест»
     CHECK(e->shots.size() == 2);
     CHECK(catalog_by_title_id("CUSA99999") == nullptr);
+    // данные о раздаче (tools/merge_torrents.py)
+    CHECK(catalog_has_torrents());
+    CHECK(e->hash == "4403a31a21012cd5fd942887d1f5c255922b20f9" && e->ru == 1 && e->voice == 0 && e->dlc == 1 && e->fix == 1 && e->backport == 0 && e->size_mb == 944);
+    const CatEntry* o = catalog_by_title_id("CUSA00001");
+    CHECK(o != nullptr && o->hash.empty() && o->ru == 0 && o->size_mb == 0);
     std::string t = catalog_text(*e);
     CHECK(t == "Line one line two");
     // поиск по названию: без регистра и знаков; русские буквы тоже

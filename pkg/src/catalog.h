@@ -12,6 +12,10 @@ struct CatEntry {
     std::string name_en, name_ru;
     CatRef cover, desc;
     std::vector<CatRef> shots;
+    // Раздача (tools/merge_torrents.py): хэш (40 hex, пусто - раздачи нет) и пометки. Нет полей - все нули.
+    std::string hash;
+    int ru = 0, voice = 0, dlc = 0, fix = 0, backport = 0;   // русский интерфейс, русская озвучка, DLC, исправление, Backport
+    int size_mb = 0;
 };
 
 // Загрузка индекса. dir - папка с catalog.json и catalog.pak. false, если каталога нет (приложение работает и без него).
@@ -19,6 +23,8 @@ bool catalog_load(const std::string& dir);
 int catalog_count();
 const CatEntry* catalog_by_title_id(const std::string& title_id);
 const CatEntry* catalog_at(int i);
+// true, если в каталоге есть данные о раздачах (запущен tools/merge_torrents.py): тогда вкладка «Каталог игр» показывает только игры с раздачей.
+bool catalog_has_torrents();
 // Поиск по названию игры (без регистра, знаков и ™®): запасной вариант, если Title ID в каталоге другого региона.
 const CatEntry* catalog_by_name(const std::string& name);
 // Сначала по Title ID, потом по названию. what (необязательно) получает "id" / "name".

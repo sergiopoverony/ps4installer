@@ -38,7 +38,8 @@ class CatalogTest(unittest.TestCase):
 
             games = [
                 {"id": "a", "cid": "EP0001-CUSA18535_00-GAME000000000000", "n": "Test Game", "r": "Тест",
-                 "c": put(jpeg()), "d": put("Line one\nline two".encode()), "s": [put(jpeg()), put(jpeg())]},
+                 "c": put(jpeg()), "d": put("Line one\nline two".encode()), "s": [put(jpeg()), put(jpeg())],
+                 "th": "4403a31a21012cd5fd942887d1f5c255922b20f9", "tu": 1, "tv": 0, "td": 1, "tf": 1, "tb": 0, "ts": 944},
                 {"id": "b", "cid": "UP0001-CUSA00001_00-OTHER00000000000", "n": "Other", "c": put(jpeg())},
             ]
             (td / "catalog.pak").write_bytes(bytes(blob))

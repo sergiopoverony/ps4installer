@@ -8,6 +8,7 @@
 #include "service.h"
 #include "games.h"
 #include "i18n.h"
+#include "torrents.h"
 #include "utf8.h"
 
 #include <stdio.h>
@@ -547,6 +548,7 @@ static bool g_stripFocus = false;  // фокус на алфавитной по�
 static int letter_index(char c) { return c == '#' ? 0 : (c - 'A' + 1); }
 
 static const char* REQ_PATH = "/data/ps4installer_app/requests.txt";
+static std::vector<ReqStatus> g_reqStatus;   // состояние каждой строки вкладки «Запрос на игры» (по порядку g_games)
 
 // Позиция в каталоге (Title ID игры под курсором) хранится в файле, чтобы после выхода продолжить с того же места.
 static const char* STATE_PATH = "/data/ps4installer_app/state.txt";
@@ -590,17 +592,24 @@ static void load_catalog_list()
     }
     g_games.clear();
     int n = catalog_count();
+    const bool onlyTorrents = catalog_has_torrents();
     for (int i = 0; i < n; i++) {
         const CatEntry* e = catalog_at(i);
         if (!e || e->name_en.empty()) continue;
         if (std::find(skip.begin(), skip.end(), e) != skip.end()) continue;
+        if (onlyTorrents && e->hash.empty()) continue;   // игр без раздачи в каталоге не показываем
         Game g;
         g.title = e->name_en;
         g.title_id = e->title_id;
+        g.hash = e->hash;
+        g.rus = (e->ru || e->voice) ? 1 : 0;
+        g.patches = e->fix ? 1 : 0;
+        g.dlcs = e->dlc ? 1 : 0;
         g.listOnly = true;
         g_games.push_back(g);
     }
     std::sort(g_games.begin(), g_games.end(), [](const Game& a, const Game& b) { return lower_ascii(a.title) < lower_ascii(b.title); });
+    std::stable_partition(g_games.begin(), g_games.end(), [](const Game& g) { return !g.title_id.empty(); });   // игры без кода диска - в конец
     g_tileImg.clear(); g_tileTried.clear();
     if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
     g_topRow = 0;
@@ -651,8 +660,21 @@ static void load_requests()
         Game g;
         g.title_id = t == std::string::npos ? "" : lines[i].substr(0, t);
         g.title = t == std::string::npos ? lines[i] : lines[i].substr(t + 1);
+        size_t t2 = g.title.find('\t');   // третье поле - хэш раздачи
+        if (t2 != std::string::npos) { g.hash = g.title.substr(t2 + 1); g.title = g.title.substr(0, t2); }
         g.listOnly = true;
         g_games.push_back(g);
+    }
+    {   // состояние запросов у торрент-клиента (одним обращением)
+        std::vector<std::string> hs;
+        for (size_t i = 0; i < g_games.size(); i++) hs.push_back(g_games[i].hash);
+        std::map<std::string, ReqStatus> st = torrents_poll(hs);
+        g_reqStatus.assign(g_games.size(), ReqStatus());
+        for (size_t i = 0; i < g_games.size(); i++) {
+            std::string h = torrents_clean_hash(g_games[i].hash);
+            if (!h.empty() && st.count(h)) g_reqStatus[i] = st[h];
+            else g_reqStatus[i].state = RS_GONE;
+        }
     }
     g_tileImg.clear(); g_tileTried.clear();
     if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
@@ -669,9 +691,13 @@ static bool req_remove(const Game& g)
     std::string drop = g.title_id + "\t" + g.title;
     FILE* f = fopen(REQ_PATH, "wb");
     if (!f) return false;
-    for (size_t i = 0; i < lines.size(); i++)
-        if (lines[i] != drop) { fputs(lines[i].c_str(), f); fputc('\n', f); }
+    for (size_t i = 0; i < lines.size(); i++) {
+        bool same = lines[i] == drop || lines[i].compare(0, drop.size() + 1, drop + "\t") == 0;   // со старым форматом и с хэшем
+        if (!same) { fputs(lines[i].c_str(), f); fputc('\n', f); }
+    }
     fclose(f);
+    // Раздача, которую ps4torrent ещё не получил (ждёт сети), отменяется. Уже полученную удаляет сам ps4torrent.
+    if (!g.hash.empty()) torrents_cancel(g.hash);
     return true;
 }
 
@@ -919,7 +945,7 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
     }
 
     // Пометки значками в левом верхнем углу: русификатор, патч, DLC
-    if (!g.console && !g.listOnly) {
+    if (!g.console) {
         int tx = x + 6;
         const bool has[3] = { g.rus != 0, g.patches != 0, g.dlcs != 0 };
         for (int k = 0; k < 3; k++) {
@@ -1039,8 +1065,25 @@ static void draw_requests()
         }
         int tx = ix + REQ_ICON + 28;
         int idw = text_w(g.title_id) + 20;
-        draw_text(fit_chars(g.title, (w - REQ_ICON - 28 - idw - 60) / g_cellW), tx, y + rh / 2 + FONT_PX / 3, C_TEXT, bg);
-        draw_text(g.title_id, MARGIN_X + w - 20 - text_w(g.title_id), y + rh / 2 + FONT_PX / 3, C_DIM, bg);
+        bool haveSt = (size_t)idx < g_reqStatus.size() && !g.hash.empty();
+        int ty = y + rh / 2 + FONT_PX / 3 - (haveSt ? 18 : 0);
+        draw_text(fit_chars(g.title, (w - REQ_ICON - 28 - idw - 60) / g_cellW), tx, ty, C_TEXT, bg);
+        draw_text(g.title_id, MARGIN_X + w - 20 - text_w(g.title_id), ty, C_DIM, bg);
+        if (haveSt) {
+            const ReqStatus& rs = g_reqStatus[(size_t)idx];
+            std::string st;
+            Color sc = C_DIM;
+            switch (rs.state) {
+                case RS_WAIT: st = tr("req.st_wait"); break;
+                case RS_QUEUED: st = tr("req.st_queue"); break;
+                case RS_DOWNLOADING: st = trf("req.st_dl", std::to_string(rs.pct)); sc = C_GREEN; break;
+                case RS_PAUSED: st = trf("req.st_paused", std::to_string(rs.pct)); break;
+                case RS_DONE: st = tr("req.st_done"); sc = C_GREEN; break;
+                case RS_NOSVC: st = tr("req.st_nosvc"); sc = C_WARN; break;
+                default: st = tr("req.st_gone"); break;
+            }
+            draw_text(fit_chars(st, (w - REQ_ICON - 28 - 60) / g_cellW), tx, ty + 44, sc, bg);
+        }
     }
 }
 
@@ -1645,6 +1688,11 @@ static bool request_game(const Game& g, std::string& msg)
 {
     const char* path = REQ_PATH;
     std::string line = g.title_id + "\t" + g.title;
+    if (!g.hash.empty()) {   // настоящий запрос: файл <хэш>.magnet в папке торрентов, дальше работает ps4torrent
+        std::string err;
+        if (!torrents_request(g.hash, g.title, err)) { msg = tr("req.fail_write") + std::string(": ") + err; return false; }
+        line += "\t" + g.hash;
+    }
     std::string all;
     if (FILE* f = fopen(path, "rb")) {
         char buf[4096]; size_t n;

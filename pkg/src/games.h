@@ -8,6 +8,7 @@
 // Плитка игры: одна на title_id. Патчи, дополнения и русификаторы считаются и показываются пометками.
 struct Game {
     std::string title, title_id, path;
+    std::string hash;             // вкладки «Каталог игр» и «Запрос на игры»: хэш раздачи (торрент), пусто - нет
     uint64_t size = 0;
     int patches = 0, dlcs = 0, rus = 0;
     bool incomplete = false;      // хотя бы один файл докачан не до конца
