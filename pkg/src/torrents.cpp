@@ -134,20 +134,6 @@ bool net_online(int timeout_ms)
     return false;
 }
 
-static std::string g_usbBase = "/mnt";
-
-void torrents_set_usb_base(const std::string& base) { g_usbBase = base; }
-
-std::string usb_root()
-{
-    for (int i = 0; i < 8; i++) {
-        std::string p = g_usbBase + "/usb" + std::to_string(i);
-        struct stat st;
-        if (stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) return p;   // как у ps4torrent: достаточно, что папка есть; если писать нельзя, это будет видно при сохранении
-    }
-    return "";
-}
-
 std::string torrents_magnet_filename(const std::string& title, const std::string& id)
 {
     std::string n;
@@ -164,20 +150,4 @@ std::string torrents_magnet_filename(const std::string& title, const std::string
         if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '-') i2 += (char)c;
     }
     return n + (i2.empty() ? "" : "_" + i2) + "_magnet.txt";
-}
-
-bool torrents_save_usb(const std::string& root, const std::string& hash, const std::string& title, const std::string& id,
-                       std::string& path, std::string& err)
-{
-    std::string h = torrents_clean_hash(hash);
-    if (h.empty()) { err = "bad hash"; return false; }
-    if (root.empty()) { err = "no usb"; return false; }
-    path = root + "/" + torrents_magnet_filename(title, id);
-    FILE* f = fopen(path.c_str(), "wb");
-    if (!f) { err = "write"; return false; }
-    std::string m = torrents_magnet(h, title) + "\n";
-    bool ok = fwrite(m.data(), 1, m.size(), f) == m.size();
-    if (fclose(f) != 0) ok = false;
-    if (!ok) { err = "write"; return false; }
-    return true;
 }

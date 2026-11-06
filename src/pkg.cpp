@@ -407,6 +407,53 @@ std::vector<std::string> pkg_roots() {
     return roots;
 }
 
+std::vector<std::string> usb_mounts() {
+    std::vector<std::string> out;
+    std::string base = std::string(USB_PREFIX);
+    size_t sl = base.rfind('/');
+    std::string parentDir = sl == std::string::npos ? "/" : base.substr(0, sl);
+    struct stat parent;
+    bool haveParent = stat(parentDir.c_str(), &parent) == 0;
+    for (int i = 0; i < 10; i++) {
+        std::string mp = base + std::to_string(i);
+        struct stat st;
+        if (stat(mp.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+        bool mounted = haveParent && st.st_dev != parent.st_dev;
+        if (!mounted) {   // пустая точка без накопителя не нужна
+            DIR* d = opendir(mp.c_str());
+            if (d) {
+                while (struct dirent* e = readdir(d)) {
+                    if (strcmp(e->d_name, ".") != 0 && strcmp(e->d_name, "..") != 0) { mounted = true; break; }
+                }
+                closedir(d);
+            }
+        }
+        if (mounted) out.push_back(mp);
+    }
+    return out;
+}
+
+bool write_magnet_file(const std::string& dir, const std::string& name, const std::string& text, std::string* err) {
+    bool known = false;
+    std::vector<std::string> ms = usb_mounts();
+    for (const std::string& m : ms) known = known || m == dir;
+    if (!known) { *err = "нет такой флешки"; return false; }
+    const std::string suffix = "_magnet.txt";
+    if (name.empty() || name.size() > 200 || name.find('/') != std::string::npos || name.find("..") != std::string::npos || name[0] == '.' ||
+        name.size() <= suffix.size() || name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0) {
+        *err = "недопустимое имя файла";
+        return false;
+    }
+    if (text.empty() || text.size() > 4096 || text.compare(0, 8, "magnet:?") != 0) { *err = "это не magnet-ссылка"; return false; }
+    std::string path = dir + "/" + name;
+    FILE* f = fopen(path.c_str(), "wb");
+    if (!f) { *err = std::string("не удалось создать файл (errno=") + std::to_string(errno) + ")"; return false; }
+    bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
+    if (fclose(f) != 0) ok = false;
+    if (!ok) { *err = "не удалось записать файл"; return false; }
+    return true;
+}
+
 static bool skip_dir(const char* name) {
     return name[0] == '.' || strcmp(name, "$RECYCLE.BIN") == 0 ||
            strcmp(name, "System Volume Information") == 0 || strcmp(name, "disc") == 0;

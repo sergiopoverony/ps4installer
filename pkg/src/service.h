@@ -64,3 +64,8 @@ struct InstallStatus {
     std::vector<InstallJob> jobs;
 };
 bool service_status(InstallStatus& out);
+
+// Подключённые флешки (/mnt/usbN): список спрашиваем у службы, у неё есть доступ к /mnt. false - служба не ответила.
+bool service_usb_roots(std::vector<std::string>& roots);
+// Записывает magnet-ссылку файлом name (Имя_magnet.txt) в корень флешки root. false и текст ошибки в err.
+bool service_write_magnet(const std::string& root, const std::string& name, const std::string& text, std::string& err);

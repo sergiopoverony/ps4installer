@@ -71,6 +71,42 @@ bool service_free(uint64_t& bytes, uint64_t* total)
     return true;
 }
 
+bool service_usb_roots(std::vector<std::string>& roots)
+{
+    roots.clear();
+    HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, "/usb", 3000);
+    if (!r.connected || r.status != 200) return false;
+    JsonValue j;
+    if (!json_parse(r.body, j) || !j["ok"].asBool()) return false;
+    const JsonValue& a = j["roots"];
+    for (size_t i = 0; i < a.arr.size(); i++) roots.push_back(a.arr[i].asStr());
+    return true;
+}
+
+static std::string json_q(const std::string& s)
+{
+    std::string o = "\"";
+    for (size_t i = 0; i < s.size(); i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c == '"' || c == '\\') { o += '\\'; o += (char)c; }
+        else if (c < 0x20) o += ' ';
+        else o += (char)c;
+    }
+    return o + "\"";
+}
+
+bool service_write_magnet(const std::string& root, const std::string& name, const std::string& text, std::string& err)
+{
+    std::string body = "{\"args\":[" + json_q(root) + "," + json_q(name) + "," + json_q(text) + "]}";
+    HttpResult r = http_post(SERVICE_HOST, SERVICE_PORT, "/write_magnet", body, 5000);
+    if (!r.connected) { err = "служба не отвечает"; return false; }
+    JsonValue j;
+    if (r.status == 200 && json_parse(r.body, j) && j["ok"].asBool()) return true;
+    err = json_parse(r.body, j) ? j["detail"].asStr() : "ошибка";
+    if (err.empty()) err = "ошибка " + std::to_string(r.status);
+    return false;
+}
+
 bool service_icon(const std::string& pkgPath, std::string& png)
 {
     std::string q = "/icon?path=";

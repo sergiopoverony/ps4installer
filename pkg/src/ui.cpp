@@ -1893,13 +1893,32 @@ static void card_space()
 }
 
 // Проверка сети и флешки - в отдельном потоке (до пары секунд), окно при этом сразу на экране.
+struct UsbJob { volatile int state; std::string usb; };
+static UsbJob g_usbJob = { 0, std::string() };
+// Флешку ищет служба (у неё есть доступ к /mnt): берём первую подключённую.
+static std::string find_usb()
+{
+    std::vector<std::string> roots;
+    if (service_usb_roots(roots) && !roots.empty()) return roots[0];
+    return "";
+}
+
+static void* usb_thread(void*)
+{
+    g_usbJob.usb = find_usb();
+    __sync_synchronize();
+    g_usbJob.state = 2;
+    return nullptr;
+}
+
 struct NetJob { volatile int state; bool online; std::string usb; };
 static NetJob g_netJob = { 0, false, std::string() };
 
 static void* net_thread(void*)
 {
     g_netJob.online = net_online(800);
-    g_netJob.usb = usb_root();
+    g_netJob.usb = find_usb();
+    logf_("ui: флешка: %s | интернет: %d", g_netJob.usb.empty() ? "не найдена" : g_netJob.usb.c_str(), g_netJob.online ? 1 : 0);
     __sync_synchronize();
     g_netJob.state = 2;
     return nullptr;
@@ -1914,7 +1933,7 @@ static void fav_case_compute()
     if (g_netJob.state == 1) return;                           // прошлая проверка ещё идёт: подождём её
     g_netJob.state = 1;
     pthread_t t;
-    if (pthread_create(&t, nullptr, net_thread, nullptr) != 0) { g_netJob.online = false; g_netJob.usb = usb_root(); g_netJob.state = 2; return; }
+    if (pthread_create(&t, nullptr, net_thread, nullptr) != 0) { g_netJob.online = false; g_netJob.usb = find_usb(); g_netJob.state = 2; return; }
     pthread_detach(t);
 }
 
@@ -2135,10 +2154,16 @@ void ui_pump()
 
     if (g_mode == MODE_CONFIRM && g_cardReason == CARD_FAV && g_favCase == FC_USB && !g_favDone) {   // флешку можно вставить, пока окно открыто
         static uint64_t lastUsb = 0;
-        if (now - lastUsb >= 1000000) {
+        if (g_usbJob.state == 2) {
+            __sync_synchronize();
+            if (g_usbJob.usb != g_favUsb) { g_favUsb = g_usbJob.usb; g_redraw = 2; }
+            g_usbJob.state = 0;
+        }
+        if (g_usbJob.state == 0 && now - lastUsb >= 2000000) {   // проверка в потоке: обращение к пустой точке монтирования может зависнуть
             lastUsb = now;
-            std::string u = usb_root();
-            if (u != g_favUsb) { g_favUsb = u; g_redraw = 2; }
+            g_usbJob.state = 1;
+            pthread_t t;
+            if (pthread_create(&t, nullptr, usb_thread, nullptr) == 0) pthread_detach(t); else g_usbJob.state = 0;
         }
     }
 
@@ -2217,7 +2242,12 @@ void ui_pump()
                 } else g_confirmErr = tr("req.fail_write") + std::string(": ") + err;
             } else if (!g_favDone && g_favCase == FC_USB && !g_favUsb.empty()) {
                 std::string path, err;
-                if (torrents_save_usb(g_favUsb, g_sel.hash, g_sel.title, g_sel.title_id, path, err)) {
+                std::string fname = torrents_magnet_filename(g_sel.title, g_sel.title_id);
+                bool wrote = false;
+                if (torrents_clean_hash(g_sel.hash).empty()) err = "bad hash";
+                else wrote = service_write_magnet(g_favUsb, fname, torrents_magnet(torrents_clean_hash(g_sel.hash), g_sel.title) + "\n", err);
+                if (wrote) {
+                    path = g_favUsb + "/" + fname;
                     req_set_flag(g_sel, 'u');
                     g_confirmErr = trf("fav.usb_saved", path.substr(path.rfind('/') + 1), ""); g_confirmOk = true; g_favDone = true;
                     g_listRefresh = true;

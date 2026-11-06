@@ -84,3 +84,9 @@ void sort_by_size(std::vector<PkgInfo>* list);
 
 // Корневые папки, которые просматривает scan_packages().
 std::vector<std::string> pkg_roots();
+
+// Подключённые флешки: /mnt/usbN, где есть отдельное монтирование (st_dev отличается от /mnt) или в папке что-то лежит.
+std::vector<std::string> usb_mounts();
+
+// Записывает текстовый файл name (только Имя_magnet.txt, без папок) в корень флешки dir (/mnt/usbN из usb_mounts()).
+bool write_magnet_file(const std::string& dir, const std::string& name, const std::string& text, std::string* err);

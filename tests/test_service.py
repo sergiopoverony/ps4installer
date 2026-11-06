@@ -428,6 +428,28 @@ class ServiceTests(unittest.TestCase):
         code, j = self.srv.post("/delete_files", {"paths": [a]})   # уже нет файла
         self.assertFalse(j["ok"])
 
+    def test_usb_and_write_magnet(self):
+        usb1 = Path(USB_PREFIX + "1")
+        shutil.rmtree(usb1, ignore_errors=True)
+        usb1.mkdir(parents=True, exist_ok=True)
+        self.srv = Server()
+        self.assertEqual(self.srv.get("/usb")[1]["roots"].count(USB_PREFIX + "1"), 0)   # пустая точка монтирования без накопителя - не флешка
+        (usb1 / "marker").write_text("x")
+        code, j = self.srv.get("/usb")
+        self.assertEqual(code, 200)
+        self.assertIn(USB_PREFIX + "1", j["roots"])
+        magnet = "magnet:?xt=urn:btih:" + "a" * 40 + "&dn=Game%20One"
+        ok = {"args": [USB_PREFIX + "1", "Game_One_CUSA00001_magnet.txt", magnet]}
+        code, j = self.srv.post("/write_magnet", ok)
+        self.assertEqual(code, 200, j)
+        self.assertEqual((usb1 / "Game_One_CUSA00001_magnet.txt").read_text(), magnet)
+        self.assertEqual(self.srv.get("/write_magnet")[0], 405)
+        for bad in (["/etc", "x_magnet.txt", magnet], [USB_PREFIX + "1", "../x_magnet.txt", magnet], [USB_PREFIX + "1", "a/b_magnet.txt", magnet],
+                    [USB_PREFIX + "1", "evil.sh", magnet], [USB_PREFIX + "1", "x_magnet.txt", "rm -rf /"], [USB_PREFIX + "9", "x_magnet.txt", magnet]):
+            self.assertEqual(self.srv.post("/write_magnet", {"args": bad})[0], 400, bad)
+        self.assertEqual(self.srv.post("/write_magnet", {"args": ["a"]})[0], 400)
+        shutil.rmtree(usb1, ignore_errors=True)
+
     def test_scan_is_cached(self):
         a = make_pkg(DATA_PKG / "ca.pkg", "UP0001-CUSA00101_00-CACHECACHECACHE1", 0x2000)
         self.srv = Server(env={"PS4I_SCAN_CACHE_SEC": "30"})

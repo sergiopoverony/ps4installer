@@ -142,6 +142,24 @@ Response route(const Request& rq) {
                  ",\"total_bytes\":" + std::to_string((unsigned long long)t) + "}";
         return r;
     }
+    if (rq.path == "/usb") {   // подключённые флешки (приложение само в /mnt не заглядывает)
+        std::vector<std::string> ms = usb_mounts();
+        r.body = "{\"ok\":true,\"roots\":[";
+        for (size_t i = 0; i < ms.size(); i++) r.body += (i ? ",\"" : "\"") + json_escape(ms[i]) + "\"";
+        r.body += "]}";
+        return r;
+    }
+    if (rq.path == "/write_magnet") {   // сохранить magnet-ссылку файлом Имя_magnet.txt в корень флешки
+        if (rq.method != "POST") return json_error(405, "method", "нужен POST");
+        std::vector<std::string> a;   // {"args":["/mnt/usb1","Имя_magnet.txt","magnet:?..."]}
+        if (!json_get_string_array(rq.body, "args", &a) || a.size() != 3)
+            return json_error(400, "bad_request", "ожидается {\"args\":[\"/mnt/usb0\",\"Игра_magnet.txt\",\"magnet:?...\"]}");
+        std::string err;
+        log_printf("write_magnet request: %s/%s", a[0].c_str(), a[1].c_str());
+        if (!write_magnet_file(a[0], a[1], a[2], &err)) return json_error(400, "write_failed", err);
+        r.body = "{\"ok\":true}";
+        return r;
+    }
     if (rq.path == "/installed") {
         std::vector<std::string> ids = platform::installed_title_ids();
         r.body = "{\"ok\":true,\"title_ids\":[";
