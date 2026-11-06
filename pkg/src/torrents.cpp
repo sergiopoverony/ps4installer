@@ -151,3 +151,8 @@ std::string torrents_magnet_filename(const std::string& title, const std::string
     }
     return n + (i2.empty() ? "" : "_" + i2) + "_magnet.txt";
 }
+
+bool torrents_running(int timeout_ms)
+{
+    return http_get(g_host, g_port, "/status", timeout_ms).connected;
+}

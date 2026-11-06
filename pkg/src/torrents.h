@@ -32,6 +32,9 @@ std::map<std::string, ReqStatus> torrents_poll(const std::vector<std::string>& h
 // Хэш в нижний регистр; "" если это не 40 символов hex.
 std::string torrents_clean_hash(const std::string& h);
 
+// Отвечает ли ps4torrent (запущен ли он сейчас).
+bool torrents_running(int timeout_ms);
+
 // Есть ли выход в интернет (пробное подключение к нескольким публичным адресам).
 bool net_online(int timeout_ms);
 

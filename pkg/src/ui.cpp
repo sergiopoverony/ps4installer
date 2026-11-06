@@ -401,8 +401,10 @@ static Game g_sel;                         // выбранная игра
 static std::vector<PkgItem> g_selFiles;    // что будет установлено (по порядку)
 static uint64_t g_selNeed = 0, g_freeBytes = 0;
 // Окно «В избранное» из каталога: что можно сделать в зависимости от условий (интернет, торрент-клиент, место, USB).
-enum FavCase { FC_DOWNLOAD = 0, FC_NO_CLIENT, FC_LOW_SPACE, FC_USB, FC_ACTIVE, FC_CHECK };
+enum FavCase { FC_DOWNLOAD = 0, FC_NO_CLIENT, FC_LOW_SPACE, FC_USB, FC_ACTIVE, FC_CHECK, FC_NOT_RUNNING };
 static FavCase g_favCase = FC_DOWNLOAD;
+static uint64_t g_favOpened = 0;      // когда открыли окно избранного
+static bool g_favSlow = false;         // проверка идёт дольше 4 секунд
 static uint64_t g_confirmGuard = 0;   // до этого момента нажатия в окне игры не принимаются (чтобы {X}, которым окно открыли, не сработал дважды)
 static bool g_listRefresh = false;   // после действия в окне избранного список надо перечитать
 static bool g_favDone = false;   // действие выполнено, окно можно только закрыть
@@ -674,8 +676,37 @@ static std::vector<std::string> split_tabs(const std::string& line)
 }
 
 static bool g_availDirty = false;     // игра скачалась: список «Доступные игры» надо перечитать
-static uint64_t g_favFree = 0, g_favTotal = 0;
-static bool g_favFreeOk = false;
+// Свободное место: спрашиваем у службы в отдельном потоке (она бывает занята сканированием), окна берут последнее известное значение.
+struct SpaceJob { volatile int state; bool ok; uint64_t free, total; };
+static SpaceJob g_spaceJob = { 0, false, 0, 0 };
+static bool g_spOk = false;
+static uint64_t g_spFree = 0, g_spTotal = 0;
+static void* space_thread(void*)
+{
+    uint64_t f = 0, t = 0;
+    bool ok = service_free(f, &t);
+    if (!ok) ok = service_free(f, &t);
+    g_spaceJob.ok = ok; g_spaceJob.free = f; g_spaceJob.total = t;
+    __sync_synchronize();
+    g_spaceJob.state = 2;
+    return nullptr;
+}
+static void space_kick()
+{
+    if (g_spaceJob.state != 0) return;
+    g_spaceJob.state = 1;
+    pthread_t th;
+    if (pthread_create(&th, nullptr, space_thread, nullptr) != 0) { g_spaceJob.state = 0; return; }
+    pthread_detach(th);
+}
+static bool space_apply()   // true - получили новое значение
+{
+    if (g_spaceJob.state != 2) return false;
+    __sync_synchronize();
+    if (g_spaceJob.ok) { g_spOk = true; g_spFree = g_spaceJob.free; g_spTotal = g_spaceJob.total; }
+    g_spaceJob.state = 0;
+    return true;
+}
 
 // Запоминает, что у каких раздач завершилось; когда раздача докачалась, помечает «Доступные» устаревшими.
 static void req_note_states(const std::map<std::string, ReqStatus>& st)
@@ -697,6 +728,7 @@ struct PollJob {
 };
 static PollJob g_pollJob = { std::vector<std::string>(), std::map<std::string, ReqStatus>(), 0 };
 static std::map<std::string, ReqStatus> g_lastStatus;   // последние известные состояния по хэшу
+static std::map<std::string, uint64_t> g_waitSince;      // с какого момента запрос «ожидает» (клиент его всё не берёт)
 
 static void* poll_thread(void*)
 {
@@ -739,7 +771,12 @@ static bool poll_apply()
     std::map<std::string, ReqStatus> out = g_pollJob.out;
     g_pollJob.state = 0;
     req_note_states(out);
-    for (std::map<std::string, ReqStatus>::iterator it = out.begin(); it != out.end(); ++it) g_lastStatus[it->first] = it->second;
+    uint64_t tnow = sceKernelGetProcessTime();
+    for (std::map<std::string, ReqStatus>::iterator it = out.begin(); it != out.end(); ++it) {
+        g_lastStatus[it->first] = it->second;
+        if (it->second.state == RS_WAIT) { if (!g_waitSince.count(it->first)) g_waitSince[it->first] = tnow; }
+        else g_waitSince.erase(it->first);
+    }
     return true;
 }
 
@@ -772,7 +809,7 @@ static void load_requests()
         g.listOnly = true;
         g_games.push_back(g);
     }
-    g_favFreeOk = service_free(g_favFree, &g_favTotal);
+    space_kick();
     req_fill_status();
     poll_kick();
     g_tileImg.clear(); g_tileTried.clear();
@@ -1178,28 +1215,34 @@ static void draw_requests()
             else if (known && (size_t)idx < g_reqStatus.size()) {
                 const ReqStatus& rs = g_reqStatus[(size_t)idx];
                 switch (rs.state) {
-                    case RS_WAIT: st = tr("req.st_wait"); break;
+                    case RS_WAIT: {
+                        std::map<std::string, uint64_t>::iterator w = g_waitSince.find(torrents_clean_hash(g.hash));
+                        bool slow = w != g_waitSince.end() && sceKernelGetProcessTime() - w->second > 5000000ULL;
+                        st = tr(slow ? "fav.start_client" : "req.st_wait");   // ждёт дольше 5 секунд - клиент, скорее всего, не запущен
+                        if (slow) sc = C_WARN;
+                        break;
+                    }
                     case RS_QUEUED: st = tr("req.st_queue"); break;
                     case RS_DOWNLOADING: st = trf("req.st_dl", std::to_string(rs.pct)); sc = C_GREEN; break;
                     case RS_PAUSED: st = trf("req.st_paused", std::to_string(rs.pct)); break;
                     case RS_DONE: st = tr("req.st_done"); sc = C_GREEN; break;
-                    case RS_NOSVC: st = tr("req.st_nosvc"); sc = C_WARN; break;
+                    case RS_NOSVC: st = tr("fav.start_client"); sc = C_WARN; break;
                     default: st = tr("req.st_gone"); break;
                 }
             }
             if (!st.empty()) draw_text(fit_chars(st, (sx0 - tx - 30) / g_cellW), tx, ty + 44, sc, bg);
         }
-        if (g.size > 0 && g_favFreeOk && g_favFree > 0) {   // полоска места, как в карточках игр
+        if (g.size > 0 && g_spOk && g_spFree > 0) {   // полоска места, как в карточках игр
             const int bh = 14;
             int by = ty + 11;
-            bool over = g.size > g_favFree;
-            int needW = g_favFree > 0 ? (int)((double)SPW * (double)(g.size < g_favFree ? g.size : g_favFree) / (double)g_favFree) : 0;
+            bool over = g.size > g_spFree;
+            int needW = g_spFree > 0 ? (int)((double)SPW * (double)(g.size < g_spFree ? g.size : g_spFree) / (double)g_spFree) : 0;
             if (needW < 4) needW = 4;
             fill(sx0, by, SPW, bh, over ? C_WARN : C_BAR_FREE);   // вся полоска - свободное место, оранжевая часть - сколько займёт игра
             fill(sx0, by, needW, bh, C_BAR_NEED);
-            bool fits = g.size <= g_favFree;
+            bool fits = g.size <= g_spFree;
             std::string a1 = trf("space.need", fmt_size(g.size));
-            std::string b1 = trf("space.free", fmt_size(g_favFree));
+            std::string b1 = trf("space.free", fmt_size(g_spFree));
             draw_text(a1, sx0, by + bh + FONT_PX - 4, fits ? C_BAR_NEED : C_WARN, bg);
             draw_text(b1, sx0 + SPW - text_w(b1), by + bh + FONT_PX - 4, C_BAR_FREE, bg);
         } else if (g.size > 0) {
@@ -1395,36 +1438,50 @@ static void draw_confirm()
         // Под обложкой - размер игры и место (как в «Доступных»); справа - вопрос или причина, внизу - кнопки.
         int sx = x + 30, sy = y + 30 + COVER_H + 24;
         draw_space_info(sx, sy, COVER_W, false, true);
-        int bx = x + 30 + COVER_W + 30, bw = W - (bx - x) - 30, by = sy;
-        const int L1 = by + TITLE_PX + 10, L2 = L1 + TITLE_PX + 22;   // две строки по центру, шрифт как у названия игры
-        std::string h;
+        int bx = x + 30 + COVER_W + 30, bw = W - (bx - x) - 30, by = sy - 10;
+        const int PH = 124;                   // плашка с вопросом: цвет по смыслу, текст по центру, шрифт как у названия игры
+        std::string h, l1, l2;
+        Color pbg = C_TILE, c1 = C_TEXT, c2 = C_DIM;
         if (g_cardReason == CARD_REQUEST) {   // из каталога: только в избранное, ничего не запускается
-            if (!g_confirmErr.empty()) draw_title_fit(g_confirmErr, bx, L1, bw, true, C_PANEL, g_confirmOk ? C_GREEN : C_WARN);
-            else if (!g_favDone && g_selNeed > 0 && g_freeOk && g_selNeed > g_freeBytes) draw_title_fit(tr("card.lowspace"), bx, L1, bw, true, C_PANEL, C_WARN);
+            if (!g_confirmErr.empty()) {
+                l1 = g_confirmErr;
+                if (g_confirmOk) { pbg = C_GREEN; c1 = C_BG; } else { pbg = C_RED_BG; c1 = C_TEXT; }
+            } else if (!g_favDone && g_selNeed > 0 && g_freeOk && g_selNeed > g_freeBytes) {
+                l1 = tr("card.lowspace"); pbg = C_RED_BG;
+            } else l1 = tr("fav.add_q");
             h = tr(g_favDone ? "hint.fav_close" : "hint.fav_add");
         } else {                              // из избранного: что делать, зависит от условий
-            std::string q, q2;
-            Color qc = C_TEXT, q2c = C_DIM;
             if (g_favDone) {
                 h = tr("hint.fav_close");
             } else if (g_favCase == FC_ACTIVE) {
-                h = tr("hint.fav_close");   // уже запрошена: без сообщений, статус виден в списке
+                h = tr("hint.fav_close");     // уже запрошена: без сообщений, статус виден в списке
             } else if (g_favCase == FC_CHECK) {
-                q = tr("fav.checking"); qc = C_DIM; h = tr("hint.fav_close");
+                l1 = tr("fav.checking"); c1 = C_DIM; h = tr("hint.fav_close");
+                if (g_favSlow) { l2 = tr("fav.start_client"); c2 = C_WARN; }
             } else if (g_favCase == FC_DOWNLOAD) {
-                q = tr("fav.ask_download"); h = tr("hint.fav_yes");
+                l1 = tr("fav.ask_download"); h = tr("hint.fav_yes");
             } else if (g_favCase == FC_NO_CLIENT) {
-                q = tr("fav.no_client"); qc = C_WARN; h = tr("hint.fav_close");
+                l1 = tr("fav.no_client"); pbg = C_RED_BG; h = tr("hint.fav_close");
+            } else if (g_favCase == FC_NOT_RUNNING) {
+                l1 = tr("fav.start_client"); pbg = C_RED_BG; h = tr("hint.fav_close");
             } else if (g_favCase == FC_LOW_SPACE) {
-                q = tr("card.lowspace"); qc = C_WARN; h = tr("hint.fav_close");
+                l1 = tr("card.lowspace"); pbg = C_RED_BG; h = tr("hint.fav_close");
             } else {
-                q = tr("fav.usb_ask");
-                if (g_favUsb.empty()) { q2 = tr("fav.usb_none"); q2c = C_WARN; h = tr("hint.fav_close"); }
-                else { q2 = tr("fav.offline"); h = tr("hint.fav_yes"); }
+                l1 = tr("fav.usb_ask");
+                if (g_favUsb.empty()) { l2 = tr("fav.usb_none"); c2 = C_WARN; h = tr("hint.fav_close"); }
+                else { l2 = tr("fav.offline"); h = tr("hint.fav_yes"); }
             }
-            if (!q.empty()) draw_title_fit(q, bx, L1, bw, true, C_PANEL, qc);
-            if (!q2.empty()) draw_title_fit(q2, bx, L2, bw, true, C_PANEL, q2c);
-            if (!g_confirmErr.empty()) draw_title_fit(g_confirmErr, bx, L1, bw, true, C_PANEL, g_confirmOk ? C_GREEN : C_WARN);
+            if (!g_confirmErr.empty()) {
+                l1 = g_confirmErr; l2.clear();
+                if (g_confirmOk) { pbg = C_GREEN; c1 = C_BG; } else { pbg = C_RED_BG; c1 = C_TEXT; }
+            }
+        }
+        if (!l1.empty()) {
+            fill(bx, by, bw, PH, pbg);
+            bool two = !l2.empty();
+            int b1 = by + (two ? PH / 2 - 8 : PH / 2 + TITLE_PX / 3);
+            draw_title_fit(l1, bx + 20, b1, bw - 40, true, pbg, c1);
+            if (two) draw_title_fit(l2, bx + 20, b1 + TITLE_PX + 18, bw - 40, true, pbg, c2);
         }
         draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
         return;
@@ -1888,8 +1945,10 @@ static bool req_set_flag(const Game& g, char flag)
 static void card_space()
 {
     g_selNeed = g_sel.size;
-    g_freeOk = service_free(g_freeBytes, &g_totalBytes);
-    if (!g_freeOk) g_freeOk = service_free(g_freeBytes, &g_totalBytes);
+    g_freeOk = g_spOk;                 // последнее известное значение, без ожидания службы
+    g_freeBytes = g_spFree;
+    g_totalBytes = g_spTotal;
+    space_kick();                      // и сразу уточняем в фоне
 }
 
 // Проверка сети и флешки - в отдельном потоке (до пары секунд), окно при этом сразу на экране.
@@ -1911,13 +1970,20 @@ static void* usb_thread(void*)
     return nullptr;
 }
 
-struct NetJob { volatile int state; bool online; std::string usb; };
-static NetJob g_netJob = { 0, false, std::string() };
+struct NetJob { volatile int state; bool online, installed, running; std::string usb; };
+static NetJob g_netJob = { 0, false, true, true, std::string() };
 
 static void* net_thread(void*)
 {
     g_netJob.online = net_online(800);
     g_netJob.usb = find_usb();
+    g_netJob.installed = true;   // список не получили - не мешаем
+    std::vector<std::pair<std::string, std::string> > inst;
+    if (g_netJob.online && service_installed_games(inst)) {
+        g_netJob.installed = false;
+        for (size_t i = 0; i < inst.size(); i++) if (inst[i].first == "BREW00088") g_netJob.installed = true;
+    }
+    g_netJob.running = g_netJob.online && g_netJob.installed ? torrents_running(1500) : true;
     logf_("ui: флешка: %s | интернет: %d", g_netJob.usb.empty() ? "не найдена" : g_netJob.usb.c_str(), g_netJob.online ? 1 : 0);
     __sync_synchronize();
     g_netJob.state = 2;
@@ -1933,25 +1999,28 @@ static void fav_case_compute()
     if (g_netJob.state == 1) return;                           // прошлая проверка ещё идёт: подождём её
     g_netJob.state = 1;
     pthread_t t;
-    if (pthread_create(&t, nullptr, net_thread, nullptr) != 0) { g_netJob.online = false; g_netJob.usb = find_usb(); g_netJob.state = 2; return; }
+    if (pthread_create(&t, nullptr, net_thread, nullptr) != 0) { g_netJob.online = false; g_netJob.installed = g_netJob.running = true; g_netJob.usb = find_usb(); g_netJob.state = 2; return; }
     pthread_detach(t);
+}
+
+// Выбор варианта окна по текущему месту (место может уточниться уже после открытия окна).
+static void fav_eval_space()
+{
+    if (g_favCase == FC_DOWNLOAD || g_favCase == FC_LOW_SPACE)
+        g_favCase = (g_freeOk && g_selNeed > 0 && g_selNeed > g_freeBytes) ? FC_LOW_SPACE : FC_DOWNLOAD;
 }
 
 static void fav_case_finish()
 {
     __sync_synchronize();
-    bool online = g_netJob.online;
+    bool online = g_netJob.online, installed = g_netJob.installed, running = g_netJob.running;
     g_favUsb = g_netJob.usb;
     g_netJob.state = 0;
     if (!online) { g_favCase = FC_USB; return; }
-    std::vector<std::pair<std::string, std::string> > inst;
-    bool client = true;   // список не получили - не мешаем
-    if (service_installed_games(inst)) {
-        client = false;
-        for (size_t i = 0; i < inst.size(); i++) if (inst[i].first == "BREW00088") client = true;
-    }
-    if (!client) { g_favCase = FC_NO_CLIENT; return; }
-    g_favCase = (g_freeOk && g_selNeed > 0 && g_selNeed > g_freeBytes) ? FC_LOW_SPACE : FC_DOWNLOAD;
+    if (!installed) { g_favCase = FC_NO_CLIENT; return; }
+    if (!running) { g_favCase = FC_NOT_RUNNING; return; }
+    g_favCase = FC_DOWNLOAD;
+    fav_eval_space();
 }
 
 static void present_frame()
@@ -2146,6 +2215,23 @@ void ui_pump()
         }
     }
 
+    if (g_svc == SVC_OK) {   // свободное место: фоновый ответ службы, раз в 15 секунд на вкладках «Каталог» и «Избранное»
+        static uint64_t lastSpace = 0;
+        if ((g_tab == TAB_CATALOG || g_tab == TAB_REQUESTS) && now - lastSpace >= 15000000ULL) { lastSpace = now; space_kick(); }
+        if (space_apply()) {
+            if (g_mode == MODE_CONFIRM && (g_cardReason == CARD_FAV || g_cardReason == CARD_REQUEST)) {
+                g_freeOk = g_spOk; g_freeBytes = g_spFree; g_totalBytes = g_spTotal;
+                fav_eval_space();
+            }
+            if (g_tab == TAB_REQUESTS || g_mode == MODE_CONFIRM) g_redraw = 2;
+        }
+    }
+
+    if (g_mode == MODE_CONFIRM && g_cardReason == CARD_FAV && g_favCase == FC_CHECK && !g_favSlow && now - g_favOpened > 4000000) {
+        g_favSlow = true;   // проверка затянулась: скорее всего, торрент-клиент не запущен
+        g_redraw = 2;
+    }
+
     if (g_mode == MODE_CONFIRM && g_cardReason == CARD_FAV && g_favCase == FC_CHECK && g_netJob.state == 2) {
         fav_case_finish();
         g_confirmGuard = now + 500000;   // кнопки после появления вопроса - с задержкой, чтобы случайный повтор не сработал
@@ -2193,6 +2279,7 @@ void ui_pump()
                 g_favDone = false;
                 info_load(g_sel);
                 fav_case_compute();
+                g_favOpened = now; g_favSlow = false;
                 g_confirmGuard = now + 500000;
                 g_mode = MODE_CONFIRM;
                 g_skipConfirmInput = true;
