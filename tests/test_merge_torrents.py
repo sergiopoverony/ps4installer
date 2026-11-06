@@ -51,7 +51,7 @@ class MergeTest(unittest.TestCase):
                 row("Alpha Game", "CUSA00010", H("b"), ru="", date="2024-01-01"),                      # новее, но без русского: проигрывает
                 row("Beta The Game 2 Deluxe Edition", "CUSA55555", H("c"), voice="Да", dlc="Да", fix="Да", size="2,0"),   # по названию (другой регион)
                 row("Zeta", "CUSA77777", H("d"), ru="Да", desc="About Zeta", cover=cover, shots=s1 + " " + s2),            # вне каталога, с картинками
-                row("Gamma Special Cut", "CUSA99999", H("9")),                                           # игра + слова -> к Gamma, не отдельной записью
+                row("Gamma Special", "CUSA99999", H("9")),                                           # игра + одно слово -> к Gamma, не отдельной записью
                 row("Omega", "", H("e")),                                                                # вне каталога, без кода и картинок
                 row("Broken", "CUSA88888", H("f"), cover="file:///nonexistent.jpg"),                    # картинка не качается: игра остаётся без неё
             ]
