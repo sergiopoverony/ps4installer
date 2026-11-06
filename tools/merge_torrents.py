@@ -116,13 +116,34 @@ def _download(url, tries, delay):
     raise last
 
 
+def fit_whole(data, size, quality=88):
+    """Картинка целиком, без обрезки: вписывается в size, остальное заполняет размытая копия той же картинки."""
+    try:
+        from PIL import Image, ImageFilter
+        import io as _io
+        im = Image.open(_io.BytesIO(data)); im.load(); im = im.convert("RGB")
+        w, h = size
+        scale = max(w / im.width, h / im.height)
+        bg = im.resize((max(w, int(im.width * scale)), max(h, int(im.height * scale))), Image.Resampling.BILINEAR)
+        l, t = (bg.width - w) // 2, (bg.height - h) // 2
+        bg = bg.crop((l, t, l + w, t + h)).filter(ImageFilter.GaussianBlur(18))
+        sc = min(w / im.width, h / im.height)
+        fg = im.resize((max(1, int(round(im.width * sc))), max(1, int(round(im.height * sc)))), Image.Resampling.LANCZOS)
+        bg.paste(fg, ((w - fg.width) // 2, (h - fg.height) // 2))
+        out = _io.BytesIO()
+        bg.save(out, "JPEG", quality=quality, optimize=True, progressive=False, subsampling=2)
+        return out.getvalue()
+    except Exception:
+        return FC.fit_jpeg(data, size)
+
+
 def media_for(row, log):
     """(обложка JPEG или None, [скриншоты JPEG]) в размерах основного каталога."""
     cover, shots = None, []
     cu = (row.get("Обложка (URL)") or "").strip()
     if cu:
         try:
-            cover = FC.fit_jpeg(download(cu), FC.PACK_COVER)
+            cover = fit_whole(download(cu), FC.PACK_COVER)
         except Exception as e:
             log("  обложка не скачалась (%s): %s" % (e, cu))
     for u in (row.get("Скриншоты (URL)") or "").split()[:FC.MAX_SHOTS]:
