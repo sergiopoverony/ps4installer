@@ -35,6 +35,9 @@ ROMAN = {"i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii":
 STOP = {"the", "edition", "editions", "definitive", "deluxe", "complete", "remastered", "remake", "ultimate", "gold", "goty",
         "standard", "digital", "premium", "ps4", "version", "fpkg", "repack", "russound", "collectors", "legendary",
         "anniversary", "hd", "bundle", "game", "of", "year", "remod", "xxl", "mod"}
+# слова, после которых это уже другая игра, а не издание той же (Doom Eternal, ... VR)
+SEQUEL = {"eternal", "vr", "origins", "odyssey", "legacy", "rising", "unleashed", "reborn", "reloaded", "returns", "redux", "arena",
+          "tactics", "online", "world", "racing", "war", "ii", "iii", "iv", "ex", "zero", "next", "rush", "remix", "legends", "heroes"}
 FIELDS = ("th", "tu", "tv", "td", "tf", "tb", "ts")
 
 
@@ -48,6 +51,9 @@ def norm(s):
 
 def _norm(s):
     """Название -> ключ для сравнения (без регистра, знаков, 'Deluxe', римских цифр)."""
+    s = re.sub(r"[™®©℠]", "", s)   # до NFKD: иначе ™ превращается в буквы «TM»
+    s = re.split(r"\s[/|]\s*(?=[^/|]*[а-яё])", s, maxsplit=1, flags=re.I)[0]   # «Game / Русское название» -> «Game»
+    s = re.sub(r"\b(?:v|ver\.?)?\s?\d+(?:\.\d+)+\b", " ", s, flags=re.I)   # номера версий: 1.04, v1.2.3
     s = unicodedata.normalize("NFKD", s)
     s = "".join(c for c in s if not unicodedata.combining(c))
     s = s.lower().replace("&", " and ")
@@ -207,7 +213,7 @@ def merge(data_dir, table_path, media=True, log=print):
         else:
             n_name += 1
 
-    # третий проход: раздача называется «Игра + 1-2 слова» (reMod, Anniversary и т.п.), а игра Sony ещё без раздачи -> тоже она.
+    # третий проход: раздача называется «Игра + 1 слово» (reMod, Anniversary и т.п.), а игра Sony ещё без раздачи -> тоже она.
     # Так у игры остаётся оригинальная обложка из PS Store, а не отдельная запись с обложкой из торрента.
     free = [(tokens(g["n"]), g) for g in games if "th" not in g and len(norm(g["n"])) >= 5]
     n_pref = 0
@@ -217,9 +223,9 @@ def merge(data_dir, table_path, media=True, log=print):
         tr = tokens(r["Название"])
         best = None
         for tg, g in free:
-            if "th" in g or len(tr) <= len(tg) or len(tr) - len(tg) > 2 or tr[:len(tg)] != tg:
+            if "th" in g or len(tr) <= len(tg) or len(tr) - len(tg) > 1 or tr[:len(tg)] != tg:
                 continue
-            if any(t.isdigit() for t in tr[len(tg):]):
+            if tr[len(tg)].isdigit() or tr[len(tg)] in SEQUEL:
                 continue
             if best is None or len(tg) > len(best[0]):
                 best = (tg, g)

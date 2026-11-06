@@ -98,6 +98,16 @@ class MergeTest(unittest.TestCase):
             self.assertNotIn("th", {x["id"]: x for x in doc3["games"]}["b"])
             self.assertEqual(len((td / "catalog.pak").read_bytes()), 21)
 
+    def test_norm(self):
+        same = [("Assassin's Creed IV Black Flag Gold Edition / Чёрный Флаг", "Assassin’s Creed IV Black Flag"),
+                ("Beyond Two Souls / ЗА ГРАНЬЮ Две души", "BEYOND: Two Souls"), ("Blood & Truth | Кровь и Истина", "Blood & Truth"),
+                ("Control 1.04 /", "CONTROL Ultimate Edition"), ("Dreams™", "Dreams"),
+                ("Fallout 4: Game of the Year Edition ReMOD 1.12", "Fallout 4")]
+        for a, b in same:
+            self.assertEqual(M.norm(a), M.norm(b), a)
+        for a, b in [("Dark Cloud / Dark Cloud 2", "Dark Cloud"), ("Call of Duty: Black Ops 6", "Call of Duty: Black Ops")]:
+            self.assertNotEqual(M.norm(a), M.norm(b), a)
+
     def test_table_images(self):
         sample = Path("/mnt/user-data/uploads/ps4.xml")
         if not sample.exists():
