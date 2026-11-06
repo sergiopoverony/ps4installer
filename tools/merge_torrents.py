@@ -16,6 +16,7 @@
 Рядом с catalog.json сохраняется catalog.json.bak (при первом запуске)."""
 import argparse
 import csv
+import hashlib
 import io
 import json
 import re
@@ -33,7 +34,7 @@ ROMAN = {"i": "1", "ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii":
          "xi": "11", "xii": "12", "xiii": "13", "xiv": "14", "xv": "15"}
 STOP = {"the", "edition", "editions", "definitive", "deluxe", "complete", "remastered", "remake", "ultimate", "gold", "goty",
         "standard", "digital", "premium", "ps4", "version", "fpkg", "repack", "russound", "collectors", "legendary",
-        "anniversary", "hd", "bundle", "game", "of", "year"}
+        "anniversary", "hd", "bundle", "game", "of", "year", "remod", "xxl", "mod"}
 FIELDS = ("th", "tu", "tv", "td", "tf", "tb", "ts")
 
 
@@ -87,7 +88,22 @@ def read_table(path):
         return [r for r in csv.DictReader(f, delimiter=";") if hash_of(r)]
 
 
+CACHE = None   # папка с уже скачанными картинками: при повторном запуске их не качаем заново
+
+
 def download(url, tries=3, delay=0.4):
+    cf = None
+    if CACHE is not None:
+        cf = CACHE / (hashlib.sha1(url.encode("utf-8")).hexdigest() + ".bin")
+        if cf.exists():
+            return cf.read_bytes()
+    data = _download(url, tries, delay)
+    if cf is not None:
+        cf.write_bytes(data)
+    return data
+
+
+def _download(url, tries, delay):
     last = None
     for _ in range(tries):
         time.sleep(delay)
@@ -133,6 +149,9 @@ def merge(data_dir, table_path, media=True, log=print):
         for k in FIELDS:
             g.pop(k, None)
 
+    global CACHE
+    CACHE = data_dir / ".media_cache"
+    CACHE.mkdir(exist_ok=True)
     table = read_table(table_path)
     by_code, by_name = {}, {}
     for r in table:
@@ -203,6 +222,16 @@ def merge(data_dir, table_path, media=True, log=print):
                     pos += len(b)
             e.update(fields_of(r))
             extras.append(e)
+    # подозрительные пары: название раздачи начинается с названия игры магазина, но сопоставлено не было. Только отчёт, ничего не меняется.
+    shop = [(norm(g["n"]), g) for g in games if len(norm(g["n"])) >= 5]
+    with open(data_dir / "near_matches.csv", "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(["Раздача", "Игра магазина", "Код"])
+        for e in extras:
+            ne = norm(e["n"])
+            for ns, g in shop:
+                if ne.startswith(ns) and ne != ns:
+                    w.writerow([e["n"], g["n"], g.get("cid", "")])
     games.extend(extras)
     doc["games"] = games
     doc["count"] = len(games)
