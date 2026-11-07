@@ -98,6 +98,46 @@ class MergeTest(unittest.TestCase):
             self.assertNotIn("th", {x["id"]: x for x in doc3["games"]}["b"])
             self.assertEqual(len((td / "catalog.pak").read_bytes()), 21)
 
+    def test_make_patch(self):
+        import make_patch as MP
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            pak = bytearray(b"PS4CATPK" + struct.pack("<II", 1, 0))
+            pak.extend(b"hello")
+            games = [{"id": "a", "cid": "UP0001-CUSA00010_00-AAAA000000000000", "n": "Alpha Game", "c": [16, 5]},
+                     {"id": "b", "cid": "UP0001-CUSA00020_00-BBBB000000000000", "n": "Beta", "c": [16, 5]}]
+            (td / "catalog.pak").write_bytes(bytes(pak))
+            (td / "catalog.json").write_text(json.dumps({"version": 1, "games": games}))
+            cover = jpg(td / "cover.jpg", size=(300, 400))
+            first = [row("Alpha Game", "CUSA00010", H("a")),
+                     row("Zeta", "CUSA77777", H("d"), desc="Zeta text", cover=cover)]
+            with open(td / "t1.csv", "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f, delimiter=";"); w.writerow(RT.HEADER); w.writerows(first)
+            M.merge(td, td / "t1.csv", media=True, log=lambda s: None)       # основной каталог: состояние «до»
+            base_json = (td / "catalog.json").read_text(encoding="utf-8")
+            second = [row("Alpha Game", "CUSA00010", H("a"), ru="Да"),         # у Alpha появился русский
+                      row("Beta", "CUSA00020", H("b")),                        # у Beta появилась раздача
+                      row("Theta", "CUSA55555", H("e"), desc="Theta text", cover=cover)]   # новая игра вне каталога; Zeta пропала
+            with open(td / "t2.csv", "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f, delimiter=";"); w.writerow(RT.HEADER); w.writerows(second)
+            res = MP.make_patch(td, td / "t2.csv", media=True, log=lambda s: None)
+            self.assertEqual((res["patch"], res["added"], res["changed"], res["removed"]), (2, 1, 2, 1))
+            self.assertEqual((td / "catalog.json").read_text(encoding="utf-8"), base_json)   # основной каталог не изменился
+            p = json.loads((td / "catalog_2.json").read_text(encoding="utf-8"))
+            ms = {g["id"]: g for g in p["games"] if g.get("m")}
+            self.assertEqual(ms["a"]["tu"], 1)
+            self.assertEqual(ms["b"]["th"], H("b"))
+            new = [g for g in p["games"] if not g.get("m")]
+            self.assertEqual([g["n"] for g in new], ["Theta"])
+            self.assertEqual(len(p["remove"]), 1)
+            pk = (td / "catalog_2.pak").read_bytes()
+            ref = new[0]["d"]
+            self.assertEqual(pk[ref[0]:ref[0] + ref[1]], b"Theta text")
+            self.assertEqual(Image.open(io.BytesIO(pk[new[0]["c"][0]:new[0]["c"][0] + new[0]["c"][1]])).size, (350, 350))
+            # следующая заплатка без изменений не создаётся
+            self.assertIsNone(MP.make_patch(td, td / "t2.csv", media=True, log=lambda s: None))
+            self.assertFalse((td / "catalog_3.json").exists())
+
     def test_norm(self):
         same = [("Assassin's Creed IV Black Flag Gold Edition / Чёрный Флаг", "Assassin’s Creed IV Black Flag"),
                 ("Beyond Two Souls / ЗА ГРАНЬЮ Две души", "BEYOND: Two Souls"), ("Blood & Truth | Кровь и Истина", "Blood & Truth"),

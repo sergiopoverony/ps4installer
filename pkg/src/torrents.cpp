@@ -4,6 +4,7 @@
 #include "log.h"
 
 #include <stdio.h>
+#include <time.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -155,4 +156,24 @@ std::string torrents_magnet_filename(const std::string& title, const std::string
 bool torrents_running(int timeout_ms)
 {
     return http_get(g_host, g_port, "/status", timeout_ms).connected;
+}
+
+static long g_netAt = 0;
+static bool g_netLast = false;
+static int g_netFails = 0;
+
+bool net_online_cached(int timeout_ms, bool background)
+{
+    long now = (long)time(NULL);
+    long age = now - g_netAt;
+    if (g_netAt != 0 && age >= 0) {
+        long keep = g_netLast ? 20 : (background ? (15L << (g_netFails > 5 ? 5 : g_netFails)) : 10);
+        if (background && !g_netLast && keep > 600) keep = 600;
+        if (age < keep) return g_netLast;   // недавно уже проверяли: сеть не трогаем
+    }
+    bool ok = net_online(timeout_ms);
+    g_netAt = now == 0 ? 1 : now;
+    g_netLast = ok;
+    if (ok) g_netFails = 0; else if (g_netFails < 10) g_netFails++;
+    return ok;
 }

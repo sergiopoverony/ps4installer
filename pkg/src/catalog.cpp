@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <map>
 
 #define STB_IMAGE_IMPLEMENTATION
 #define STBI_NO_BMP
@@ -22,7 +23,8 @@
 #include "stb_image.h"
 
 static std::vector<CatEntry> g_entries;
-static std::string g_pakPath;
+static std::vector<std::string> g_pakPaths;   // [0] - основной catalog.pak, дальше заплатки
+static int g_patchCount = 0, g_patchLast = 0;
 static bool g_hasTorrents = false;
 
 static bool read_file(const std::string& path, std::string& out)
@@ -36,53 +38,155 @@ static bool read_file(const std::string& path, std::string& out)
     return true;
 }
 
-static CatRef ref_of(const JsonValue& v)
+static CatRef ref_of(const JsonValue& v, int pak)
 {
     CatRef r;
     if (v.type == JsonValue::ARR && v.arr.size() == 2) {
         r.off = (uint64_t)v.arr[0].asNum();
         r.len = (uint64_t)v.arr[1].asNum();
+        r.pak = pak;
     }
     return r;
 }
 
-bool catalog_load(const std::string& dir)
+static void fill_ids(CatEntry& e)
+{
+    // cid вида EP0001-CUSA18535_00-GAME000000000000: Title ID - между первым и вторым '-', до '_'
+    e.title_id.clear();
+    size_t a = e.cid.find('-');
+    if (a != std::string::npos && e.cid.size() >= a + 10) e.title_id = e.cid.substr(a + 1, 9);
+}
+
+// Запись целиком (основной каталог или новая игра заплатки).
+static CatEntry entry_of(const JsonValue& g, int pak)
+{
+    CatEntry e;
+    e.id = g["id"].asStr();
+    e.cid = g["cid"].asStr();
+    fill_ids(e);
+    e.name_en = g["n"].asStr();
+    e.name_ru = g["r"].asStr();
+    e.cover = ref_of(g["c"], pak);
+    e.desc = ref_of(g["d"], pak);
+    const JsonValue& s = g["s"];
+    for (size_t k = 0; k < s.arr.size(); k++) e.shots.push_back(ref_of(s.arr[k], pak));
+    e.hash = g["th"].asStr();
+    e.ru = (int)g["tu"].asInt();
+    e.voice = (int)g["tv"].asInt();
+    e.dlc = (int)g["td"].asInt();
+    e.fix = (int)g["tf"].asInt();
+    e.backport = (int)g["tb"].asInt();
+    e.size_mb = (int)g["ts"].asInt();
+    return e;
+}
+
+static bool has_key(const JsonValue& g, const char* k)
+{
+    if (g.type != JsonValue::OBJ) return false;
+    for (size_t i = 0; i < g.obj.size(); i++) if (g.obj[i].first == k) return true;
+    return false;
+}
+
+// Заплатка к существующей игре ("m": 1): перезаписываются только те поля, что есть в записи.
+static void merge_entry(const JsonValue& g, int pak, CatEntry& e)
+{
+    if (has_key(g, "n")) e.name_en = g["n"].asStr();
+    if (has_key(g, "r")) e.name_ru = g["r"].asStr();
+    if (has_key(g, "c")) e.cover = ref_of(g["c"], pak);
+    if (has_key(g, "d")) e.desc = ref_of(g["d"], pak);
+    if (has_key(g, "s")) { e.shots.clear(); const JsonValue& s = g["s"]; for (size_t k = 0; k < s.arr.size(); k++) e.shots.push_back(ref_of(s.arr[k], pak)); }
+    if (has_key(g, "th")) e.hash = g["th"].asStr();
+    if (has_key(g, "tu")) e.ru = (int)g["tu"].asInt();
+    if (has_key(g, "tv")) e.voice = (int)g["tv"].asInt();
+    if (has_key(g, "td")) e.dlc = (int)g["td"].asInt();
+    if (has_key(g, "tf")) e.fix = (int)g["tf"].asInt();
+    if (has_key(g, "tb")) e.backport = (int)g["tb"].asInt();
+    if (has_key(g, "ts")) e.size_mb = (int)g["ts"].asInt();
+}
+
+static std::string patch_name(const std::string& dir, int n, const char* ext)
+{
+    return dir + "/catalog_" + std::to_string(n) + ext;
+}
+
+// Заплатки catalog_2.json, catalog_3.json ...: новые игры, изменения у существующих ("m": 1) и список удалённых ("remove").
+static void apply_patches(const std::string& dir)
+{
+    g_patchCount = 0; g_patchLast = 0;
+    for (int n = 2; n <= 99; n++) {
+        std::string text;
+        if (!read_file(patch_name(dir, n, ".json"), text)) continue;
+        JsonValue j;
+        if (!json_parse(text, j)) { logf_("catalog: заплатка %d не разобрана, пропускаем", n); continue; }
+        int pak = (int)g_pakPaths.size();
+        g_pakPaths.push_back(patch_name(dir, n, ".pak"));
+        int added = 0, changed = 0, removed = 0;
+        std::map<std::string, size_t> idx;   // id -> позиция (поиск по списку был бы слишком медленным на тысячах игр)
+        for (size_t k = 0; k < g_entries.size(); k++) idx[g_entries[k].id] = k;
+        std::vector<bool> dead(g_entries.size(), false);
+        const JsonValue& rem = j["remove"];
+        for (size_t i = 0; i < rem.arr.size(); i++) {
+            std::map<std::string, size_t>::iterator it = idx.find(rem.arr[i].asStr());
+            if (it != idx.end()) { dead[it->second] = true; idx.erase(it); removed++; }
+        }
+        const JsonValue& games = j["games"];
+        for (size_t i = 0; i < games.arr.size(); i++) {
+            const JsonValue& g = games.arr[i];
+            std::string id = g["id"].asStr();
+            std::map<std::string, size_t>::iterator it = idx.find(id);
+            bool merge = g["m"].asInt() != 0;
+            if (merge) {
+                if (it == idx.end()) continue;   // правка игры, которой нет: пропускаем
+                merge_entry(g, pak, g_entries[it->second]);
+                changed++;
+            } else if (it != idx.end()) {
+                g_entries[it->second] = entry_of(g, pak);
+                changed++;
+            } else {
+                g_entries.push_back(entry_of(g, pak));
+                dead.push_back(false);
+                idx[id] = g_entries.size() - 1;
+                added++;
+            }
+        }
+        if (removed) {
+            std::vector<CatEntry> keep;
+            for (size_t k = 0; k < g_entries.size(); k++) if (!dead[k]) keep.push_back(g_entries[k]);
+            g_entries.swap(keep);
+        }
+        g_patchCount++; g_patchLast = n;
+        logf_("catalog: заплатка %d: добавлено %d, изменено %d, удалено %d", n, added, changed, removed);
+    }
+    g_hasTorrents = false;
+    for (size_t i = 0; i < g_entries.size(); i++) if (!g_entries[i].hash.empty()) { g_hasTorrents = true; break; }
+}
+
+bool catalog_load(const std::string& dir, const std::string& patchDir)
 {
     g_entries.clear();
+    g_pakPaths.clear();
     g_hasTorrents = false;
+    g_patchCount = 0; g_patchLast = 0;
     std::string text;
     if (!read_file(dir + "/catalog.json", text)) { logf_("catalog: нет %s/catalog.json", dir.c_str()); return false; }
     JsonValue j;
     if (!json_parse(text, j)) { logf_("catalog: catalog.json не разобран"); return false; }
     const JsonValue& games = j["games"];
     for (size_t i = 0; i < games.arr.size(); i++) {
-        const JsonValue& g = games.arr[i];
-        CatEntry e;
-        e.id = g["id"].asStr();
-        e.cid = g["cid"].asStr();
-        // cid вида EP0001-CUSA18535_00-GAME000000000000: Title ID - между первым и вторым '-', до '_'
-        size_t a = e.cid.find('-');
-        if (a != std::string::npos && e.cid.size() >= a + 10) e.title_id = e.cid.substr(a + 1, 9);
-        e.name_en = g["n"].asStr();
-        e.name_ru = g["r"].asStr();
-        e.cover = ref_of(g["c"]);
-        e.desc = ref_of(g["d"]);
-        const JsonValue& s = g["s"];
-        for (size_t k = 0; k < s.arr.size(); k++) e.shots.push_back(ref_of(s.arr[k]));
-        e.hash = g["th"].asStr();
-        e.ru = (int)g["tu"].asInt();
-        e.voice = (int)g["tv"].asInt();
-        e.dlc = (int)g["td"].asInt();
-        e.fix = (int)g["tf"].asInt();
-        e.backport = (int)g["tb"].asInt();
-        e.size_mb = (int)g["ts"].asInt();
+        CatEntry e = entry_of(games.arr[i], 0);
         if (!e.hash.empty()) g_hasTorrents = true;
         g_entries.push_back(e);
     }
-    g_pakPath = dir + "/catalog.pak";
+    g_pakPaths.push_back(dir + "/catalog.pak");
     logf_("catalog: загружено игр %d", (int)g_entries.size());
+    if (g_entries.empty()) return false;
+    apply_patches(patchDir.empty() ? dir : patchDir);
+    if (g_patchCount) logf_("catalog: всего игр после заплаток %d (заплаток %d, последняя %d)", (int)g_entries.size(), g_patchCount, g_patchLast);
     return !g_entries.empty();
 }
+
+int catalog_patch_count() { return g_patchCount; }
+int catalog_patch_last() { return g_patchLast; }
 
 int catalog_count() { return (int)g_entries.size(); }
 bool catalog_has_torrents() { return g_hasTorrents; }
@@ -152,7 +256,8 @@ static bool read_blob(const CatRef& r, std::string& out)
 {
     out.clear();
     if (r.len == 0 || r.len > (64u << 20)) return false;
-    FILE* f = fopen(g_pakPath.c_str(), "rb");
+    if (r.pak < 0 || r.pak >= (int)g_pakPaths.size()) return false;
+    FILE* f = fopen(g_pakPaths[(size_t)r.pak].c_str(), "rb");
     if (!f) return false;
     bool ok = false;
     if (fseeko(f, (off_t)r.off, SEEK_SET) == 0) {

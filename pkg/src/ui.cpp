@@ -9,6 +9,7 @@
 #include "games.h"
 #include "i18n.h"
 #include "torrents.h"
+#include "patches.h"
 #include "utf8.h"
 
 #include <stdio.h>
@@ -77,7 +78,7 @@ static int      g_redraw = 2;
 static int      g_frameID = 0;
 
 enum Tab { TAB_AVAILABLE = 0, TAB_INSTALLED = 1, TAB_CATALOG = 2, TAB_REQUESTS = 3, TAB_COUNT = 4 };
-static int g_tab = TAB_AVAILABLE;
+static int g_tab = TAB_INSTALLED;   // приложение открывается на «Установленных играх»; остальные списки грузятся в фоне
 
 static const char* TAB_KEYS[TAB_COUNT] = { "tab.available", "tab.installed", "tab.catalog", "tab.requests" };
 static std::string tab_name(int i) { return tr(TAB_KEYS[i]); }
@@ -367,11 +368,11 @@ struct ListState {
     std::string err;
 };
 static ListState g_lists[TAB_COUNT];
-static int g_listTab = TAB_AVAILABLE;
+static int g_listTab = TAB_INSTALLED;
 static bool g_installedStale = true;
 static bool g_catalogStale = true;     // список каталога надо собрать заново (первый раз, после установки/удаления)   // список установленных надо перечитать (первый раз, после установки)
-static bool g_preloaded = false;       // после первой загрузки доступных игр установленные подгружены в фоне
 
+static void catalog_letters_fwd();
 static void switch_list(int newTab)
 {
     if (newTab == g_listTab) return;
@@ -382,7 +383,89 @@ static void switch_list(int newTab)
     n.games.swap(g_games); n.img.swap(g_tileImg); n.tried.swap(g_tileTried);
     std::swap(n.cursor, g_cursor); std::swap(n.topRow, g_topRow); std::swap(n.load, g_load); n.err.swap(g_loadErr);
     g_listTab = newTab;
+    if (newTab == TAB_CATALOG) catalog_letters_fwd();
     if ((newTab == TAB_INSTALLED && g_installedStale) || (newTab == TAB_CATALOG && g_catalogStale) || newTab == TAB_REQUESTS) g_load = LS_NONE;   // перечитываем только если что-то могло измениться
+}
+
+static bool g_stripFocus = false;  // фокус на алфавитной полосе (вкладка «Каталог игр»)
+static bool g_letterHas[27];     // какие буквы есть в списке каталога: [0] - «#», [1..26] - A..Z
+static char letter_of(const std::string& t);
+static int letter_index(char c);
+
+static void catalog_letters()
+{
+    memset(g_letterHas, 0, sizeof(g_letterHas));
+    for (size_t i = 0; i < g_games.size(); i++) g_letterHas[letter_index(letter_of(g_games[i].title))] = true;
+}
+
+static void catalog_letters_fwd() { catalog_letters(); }
+
+static bool g_availFirst = true;   // «Доступные игры» ещё ни разу не загружались
+
+// Кладёт собранный список на своё место: если вкладка сейчас на экране - в активное состояние, иначе в отложенное.
+static void install_list(int tab, ListState& L)
+{
+    if (tab == TAB_INSTALLED) { g_installedStale = false; g_catalogStale = true; }   // изменился набор установленных - каталог без них собирается заново
+    if (tab == TAB_CATALOG) g_catalogStale = false;
+    if (tab == TAB_AVAILABLE) g_availFirst = false;
+    if (tab == g_listTab) {
+        g_games.swap(L.games); g_tileImg.swap(L.img); g_tileTried.swap(L.tried);
+        g_cursor = L.cursor; g_topRow = L.topRow; g_load = L.load; g_loadErr.swap(L.err);
+        if (tab == TAB_CATALOG) { catalog_letters(); g_stripFocus = false; }
+        g_status.clear();
+    } else {
+        ListState& d = g_lists[tab];
+        d.games.swap(L.games); d.img.swap(L.img); d.tried.swap(L.tried);
+        d.cursor = L.cursor; d.topRow = L.topRow; d.load = L.load; d.err.swap(L.err);
+    }
+}
+
+// Фоновая подготовка списков (пока на экране другая вкладка): отдельный поток собирает список «про запас»,
+// главный поток потом кладёт готовый на место. Чужих данных поток не трогает.
+static bool g_bgLoading[TAB_COUNT];
+static volatile int g_bgReady[TAB_COUNT];
+static ListState g_bgOut[TAB_COUNT];
+static volatile int g_bgRunning = 0;
+static int g_bgQueue[TAB_COUNT];
+static int g_bgQueueLen = 0;
+static bool g_bgFresh = false;
+static void load_games(ListState& L, bool fresh);
+static void load_installed(ListState& L);
+static void load_catalog_list(ListState& L);
+
+static void* bg_worker(void*)
+{
+    for (int i = 0; i < g_bgQueueLen; i++) {
+        int tab = g_bgQueue[i];
+        ListState L;
+        L.load = LS_LOADING;
+        if (tab == TAB_AVAILABLE) load_games(L, g_bgFresh);
+        else if (tab == TAB_INSTALLED) load_installed(L);
+        else if (tab == TAB_CATALOG) load_catalog_list(L);
+        g_bgOut[tab].games.swap(L.games); g_bgOut[tab].img.swap(L.img); g_bgOut[tab].tried.swap(L.tried);
+        g_bgOut[tab].cursor = L.cursor; g_bgOut[tab].topRow = L.topRow; g_bgOut[tab].load = L.load; g_bgOut[tab].err = L.err;
+        __sync_synchronize();
+        g_bgReady[tab] = 1;
+    }
+    g_bgRunning = 0;
+    return nullptr;
+}
+
+static bool bg_start(const int* tabs, int n, bool fresh)
+{
+    if (g_bgRunning) return false;
+    g_bgQueueLen = n;
+    for (int i = 0; i < n; i++) { g_bgQueue[i] = tabs[i]; g_bgLoading[tabs[i]] = true; g_bgReady[tabs[i]] = 0; }
+    g_bgFresh = fresh;
+    g_bgRunning = 1;
+    pthread_t th;
+    if (pthread_create(&th, nullptr, bg_worker, nullptr) != 0) {
+        for (int i = 0; i < n; i++) g_bgLoading[tabs[i]] = false;
+        g_bgRunning = 0;
+        return false;
+    }
+    pthread_detach(th);
+    return true;
 }
 
 // Окна: подтверждение установки и ход установки.
@@ -450,11 +533,10 @@ enum { CARD_OK = 0, CARD_INSTALLED, CARD_INCOMPLETE, CARD_QUEUED, CARD_LAUNCH, C
 static bool g_confirmOk = false;          // сообщение под карточкой - не ошибка (рисуется зелёным)
 static bool g_skipConfirmInput = false;   // то же нажатие Креста, что открыло окно, не считается «Установить»
 
-static void mark_installed()
+static void mark_installed(std::vector<Game>& gs)
 {
     std::vector<std::string> ids;
     if (!service_installed(ids)) return;
-    std::vector<Game>& gs = (g_listTab == TAB_AVAILABLE) ? g_games : g_lists[TAB_AVAILABLE].games;
     for (size_t i = 0; i < gs.size(); i++) {
         gs[i].installed = false;
         for (size_t k = 0; k < ids.size(); k++)
@@ -462,43 +544,39 @@ static void mark_installed()
     }
 }
 
-static void load_games(bool fresh = false)
+// Отметить установленные в списке «Доступные игры», где бы он сейчас ни лежал (активный или отложенный).
+static void mark_installed()
+{
+    mark_installed(g_listTab == TAB_AVAILABLE ? g_games : g_lists[TAB_AVAILABLE].games);
+}
+
+static void load_games(ListState& L, bool fresh)
 {
     std::vector<PkgItem> items;
     std::string err;
     if (service_scan(items, err, fresh)) {
-        build_games(items, g_games);
-        for (size_t i = g_games.size(); i-- > 0;)   // сам магазин в списке не нужен
-            if (g_games[i].title_id == SELF_TITLE_ID) g_games.erase(g_games.begin() + (long)i);
-        g_tileImg.clear(); g_tileTried.clear();
-        for (size_t i = 0; i < g_games.size(); i++)
-            for (size_t k = 0; k < g_games[i].files.size(); k++)
-                if (g_games[i].files[k].incomplete) g_games[i].incomplete = true;
-        mark_installed();
-        if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
-        g_topRow = 0;
-        g_load = LS_OK;
-        g_loadErr.clear();
+        build_games(items, L.games);
+        for (size_t i = L.games.size(); i-- > 0;)   // сам магазин в списке не нужен
+            if (L.games[i].title_id == SELF_TITLE_ID) L.games.erase(L.games.begin() + (long)i);
+        L.img.clear(); L.tried.clear();
+        for (size_t i = 0; i < L.games.size(); i++)
+            for (size_t k = 0; k < L.games[i].files.size(); k++)
+                if (L.games[i].files[k].incomplete) L.games[i].incomplete = true;
+        mark_installed(L.games);
+        if (L.cursor >= (int)L.games.size()) L.cursor = L.games.empty() ? 0 : (int)L.games.size() - 1;
+        L.topRow = 0;
+        L.load = LS_OK;
+        L.err.clear();
     } else {
-        g_load = LS_ERROR;
-        g_loadErr = err;
-        g_games.clear();
+        L.load = LS_ERROR;
+        L.err = err;
+        L.games.clear();
     }
-    g_status.clear();
 }
 
-static void load_installed();
+static void load_installed(ListState& L);
 
-// Подгружаем список установленных игр (и потом их картинки) в фоне, пока открыта другая вкладка.
-static void preload_installed()
-{
-    if (g_listTab != TAB_AVAILABLE) return;
-    switch_list(TAB_INSTALLED);
-    load_installed();
-    switch_list(TAB_AVAILABLE);
-}
-
-static void load_catalog_list();
+static void load_catalog_list(ListState& L);
 static std::string lower_ascii(std::string s)
 {
     for (size_t i = 0; i < s.size(); i++) if (s[i] >= 'A' && s[i] <= 'Z') s[i] = (char)(s[i] - 'A' + 'a');
@@ -506,16 +584,16 @@ static std::string lower_ascii(std::string s)
 }
 
 // Вкладка «Установленные игры»: список берём у службы, названия - из param.sfo, а если их нет - из каталога.
-static void load_installed()
+static void load_installed(ListState& L)
 {
     std::vector<std::pair<std::string, std::string> > list;
     if (!service_installed_games(list)) {
-        g_load = LS_ERROR;
-        g_loadErr = tr("err.no_service");
-        g_games.clear();
+        L.load = LS_ERROR;
+        L.err = tr("err.no_service");
+        L.games.clear();
         return;
     }
-    g_games.clear();
+    L.games.clear();
     for (size_t i = 0; i < list.size(); i++) {
         if (list[i].first == SELF_TITLE_ID) continue;   // сам магазин в списке не нужен
         Game g;
@@ -527,18 +605,16 @@ static void load_installed()
         }
         g.installed = true;
         g.console = true;
-        g_games.push_back(g);
+        L.games.push_back(g);
     }
-    g_catalogStale = true;   // каталог (без установленных) собирается заново
-    for (size_t a = 1; a < g_games.size(); a++)   // по алфавиту (латиница; остальное по коду символа)
-        for (size_t b = a; b > 0 && lower_ascii(g_games[b].title) < lower_ascii(g_games[b - 1].title); b--) std::swap(g_games[b], g_games[b - 1]);
-    g_tileImg.clear(); g_tileTried.clear();
-    if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
-    g_topRow = 0;
-    g_load = LS_OK;
-    g_installedStale = false;
-    g_loadErr.clear();
-    logf_("ui: установленных игр: %d", (int)g_games.size());
+    for (size_t a = 1; a < L.games.size(); a++)   // по алфавиту (латиница; остальное по коду символа)
+        for (size_t b = a; b > 0 && lower_ascii(L.games[b].title) < lower_ascii(L.games[b - 1].title); b--) std::swap(L.games[b], L.games[b - 1]);
+    L.img.clear(); L.tried.clear();
+    if (L.cursor >= (int)L.games.size()) L.cursor = L.games.empty() ? 0 : (int)L.games.size() - 1;
+    L.topRow = 0;
+    L.load = LS_OK;
+    L.err.clear();
+    logf_("ui: установленных игр: %d", (int)L.games.size());
 }
 
 // Вкладка «Каталог игр»: все игры базы, кроме уже установленных (их ищем и по Title ID, и по названию).
@@ -550,10 +626,8 @@ static char letter_of(const std::string& t)
     return (c >= 'A' && c <= 'Z') ? (char)c : '#';
 }
 
-static bool g_letterHas[27];     // какие буквы есть в списке каталога: [0] - «#», [1..26] - A..Z
 static volatile bool g_workerBusy = false;   // список грузится в отдельном потоке: экран только крутит крутилку
 static bool g_skipDeleteInput = false; // кнопка, открывшая окно удаления, не должна сразу его закрыть
-static bool g_stripFocus = false;  // фокус на алфавитной полосе (вкладка «Каталог игр»)
 static int letter_index(char c) { return c == '#' ? 0 : (c - 'A' + 1); }
 
 static const char* REQ_PATH = "/data/ps4installer_app/requests.txt";
@@ -590,9 +664,8 @@ static void catalog_pos_read()
     }
 }
 
-static void load_catalog_list()
+static void load_catalog_list(ListState& L)
 {
-    catalog_pos_read();
     std::vector<std::pair<std::string, std::string> > inst;
     service_installed_games(inst);   // не вышло - ничего страшного, просто покажем все игры
     std::vector<const CatEntry*> skip;
@@ -600,7 +673,7 @@ static void load_catalog_list()
         const CatEntry* e = catalog_find(inst[i].first, inst[i].second);
         if (e) skip.push_back(e);
     }
-    g_games.clear();
+    L.games.clear();
     int n = catalog_count();
     const bool onlyTorrents = catalog_has_torrents();
     for (int i = 0; i < n; i++) {
@@ -617,29 +690,25 @@ static void load_catalog_list()
         g.patches = e->fix ? 1 : 0;
         g.dlcs = e->dlc ? 1 : 0;
         g.listOnly = true;
-        g_games.push_back(g);
+        L.games.push_back(g);
     }
-    std::sort(g_games.begin(), g_games.end(), [](const Game& a, const Game& b) { return lower_ascii(a.title) < lower_ascii(b.title); });
-    std::stable_partition(g_games.begin(), g_games.end(), [](const Game& g) { return !g.title_id.empty(); });   // игры без кода диска - в конец
-    g_tileImg.clear(); g_tileTried.clear();
-    if (g_cursor >= (int)g_games.size()) g_cursor = g_games.empty() ? 0 : (int)g_games.size() - 1;
-    g_topRow = 0;
+    std::sort(L.games.begin(), L.games.end(), [](const Game& a, const Game& b) { return lower_ascii(a.title) < lower_ascii(b.title); });
+    std::stable_partition(L.games.begin(), L.games.end(), [](const Game& g) { return !g.title_id.empty(); });   // игры без кода диска - в конец
+    L.img.clear(); L.tried.clear();
+    if (L.cursor >= (int)L.games.size()) L.cursor = L.games.empty() ? 0 : (int)L.games.size() - 1;
+    L.topRow = 0;
     if (!g_catalogPos.empty())   // возвращаемся к игре, на которой остановились
-        for (size_t i = 0; i < g_games.size(); i++)
-            if (g_games[i].title_id == g_catalogPos) {
-                g_cursor = (int)i;
-                int rows = ((int)g_games.size() + COLS - 1) / COLS;
-                g_topRow = g_cursor / COLS;
-                if (g_topRow > rows - ROWS_VIS) g_topRow = rows > ROWS_VIS ? rows - ROWS_VIS : 0;
+        for (size_t i = 0; i < L.games.size(); i++)
+            if (L.games[i].title_id == g_catalogPos) {
+                L.cursor = (int)i;
+                int rows = ((int)L.games.size() + COLS - 1) / COLS;
+                L.topRow = L.cursor / COLS;
+                if (L.topRow > rows - ROWS_VIS) L.topRow = rows > ROWS_VIS ? rows - ROWS_VIS : 0;
                 break;
             }
-    memset(g_letterHas, 0, sizeof(g_letterHas));
-    for (size_t i = 0; i < g_games.size(); i++) g_letterHas[letter_index(letter_of(g_games[i].title))] = true;
-    g_stripFocus = false;
-    g_load = LS_OK;
-    g_catalogStale = false;
-    g_loadErr.clear();
-    logf_("ui: игр в каталоге для показа: %d (из %d)", (int)g_games.size(), n);
+    L.load = LS_OK;
+    L.err.clear();
+    logf_("ui: игр в каталоге для показа: %d (из %d)", (int)L.games.size(), n);
 }
 
 // Вкладка «Запрос на игры»: строки файла requests.txt (Title ID, табуляция, название).
@@ -1812,7 +1881,14 @@ static unsigned pad_read()
 bool ui_init()
 {
     // Для проверок: каталог можно положить на консоль в /data/ps4installer_app/catalog/ (тогда PKG собирают без него).
-    if (!catalog_load("/data/ps4installer_app/catalog")) catalog_load("/app0/assets/misc");
+    // Основной каталог: на консоли (если PKG собран без него) или вшитый в PKG; заплатки catalog_2.json ... всегда ищем на консоли.
+    if (!catalog_load("/data/ps4installer_app/catalog")) catalog_load("/app0/assets/misc", "/data/ps4installer_app/catalog");
+    {   // заплатки из интернета: пока заглушка (адрес не выбран), в сеть не ходим
+        std::string info;
+        PatchCheck pc = patches_check_online(catalog_patch_last(), info);
+        logf_("ui: заплатки каталога: применено %d (последняя %d); из интернета: %s", catalog_patch_count(), catalog_patch_last(), pc == PC_NOT_CONFIGURED ? info.c_str() : "проверено");
+    }
+    catalog_pos_read();   // читаем здесь: фоновые потоки собирают каталог без обращения к файлу состояния
     g_scene = new Scene2D(FRAME_WIDTH, FRAME_HEIGHT, FRAME_DEPTH);
     if (!g_scene->Init(0xC000000, 2)) { logf_("ui: scene init FAILED"); return false; }
     if (!g_scene->InitFont(&g_font, "/app0/assets/fonts/DejaVuSansMono.ttf", FONT_PX)) { logf_("ui: font init FAILED"); return false; }
@@ -1958,7 +2034,14 @@ static UsbJob g_usbJob = { 0, std::string() };
 static std::string find_usb()
 {
     std::vector<std::string> roots;
-    if (service_usb_roots(roots) && !roots.empty()) return roots[0];
+    bool ok = service_usb_roots(roots);
+    static int lastLogged = -2;   // в журнал пишем только при изменении, а не каждые 2 секунды
+    int code = ok ? (int)roots.size() : -1;
+    if (code != lastLogged) {
+        lastLogged = code;
+        logf_("ui: флешки от службы: %s, найдено %d%s", ok ? "ответила" : "НЕ ответила (старая версия службы?)", (int)roots.size(), roots.empty() ? "" : (" (" + roots[0] + ")").c_str());
+    }
+    if (ok && !roots.empty()) return roots[0];
     return "";
 }
 
@@ -1975,7 +2058,7 @@ static NetJob g_netJob = { 0, false, true, true, std::string() };
 
 static void* net_thread(void*)
 {
-    g_netJob.online = net_online(800);
+    g_netJob.online = net_online_cached(800, false);   // не чаще, чем нужно: повторное открытие окна не бьёт по сети
     g_netJob.usb = find_usb();
     g_netJob.installed = true;   // список не получили - не мешаем
     std::vector<std::pair<std::string, std::string> > inst;
@@ -2038,20 +2121,15 @@ static void present_frame()
 // Рабочий поток загрузки списка (вкладка выбирается по g_tab, которая на время загрузки не меняется).
 static void* load_worker(void*)
 {
-    if (g_tab == TAB_INSTALLED) load_installed();
-    else if (g_tab == TAB_CATALOG) load_catalog_list();
-    else if (g_tab == TAB_REQUESTS) load_requests();
+    int tab = g_tab;
+    if (tab == TAB_REQUESTS) load_requests();
     else {
-        load_games(g_freshScan);
-        if (!g_preloaded && g_load == LS_OK) {
-            g_preloaded = true;
-            preload_installed();
-            if (g_games.empty()) {   // доступных игр нет: сразу показываем установленные
-                g_tab = TAB_INSTALLED;
-                switch_list(TAB_INSTALLED);
-                logf_("ui: доступных игр нет, переключаемся на «Установленные игры»");
-            }
-        }
+        ListState L;
+        L.cursor = g_cursor; L.topRow = g_topRow;
+        if (tab == TAB_INSTALLED) load_installed(L);
+        else if (tab == TAB_CATALOG) load_catalog_list(L);
+        else load_games(L, g_freshScan);
+        install_list(tab, L);
     }
     g_freshScan = false;
     g_redraw = 2;
@@ -2121,19 +2199,40 @@ void ui_pump()
         }
     }
 
-    static bool first = true;
     if ((g_svc == SVC_NO_LOADER || g_svc == SVC_FAIL) && (pressed & ORBIS_PAD_BUTTON_SQUARE)) {
         g_svc = SVC_CHECK;
         g_svcDrawn = false;
         g_redraw = 2;
     }
+    // Фоновая подготовка: когда «Установленные» показаны, остальные списки собираются в отдельном потоке.
+    static bool bgStarted = false;
+    if (g_svc == SVC_OK && !bgStarted && g_load != LS_NONE && g_load != LS_LOADING && !g_workerBusy) {
+        bgStarted = true;
+        const int q[2] = { TAB_AVAILABLE, TAB_CATALOG };
+        bg_start(q, 2, false);
+    }
+    for (int t = 0; t < TAB_COUNT; t++) {   // готовые фоновые списки кладём на место (не во время загрузки видимого списка)
+        if (!g_bgReady[t] || g_workerBusy) continue;
+        __sync_synchronize();
+        g_bgReady[t] = 0;
+        g_bgLoading[t] = false;
+        install_list(t, g_bgOut[t]);
+        g_redraw = 2;
+        logf_("ui: список «%d» подготовлен в фоне (%d игр)", t, (int)(t == g_listTab ? g_games.size() : g_lists[t].games.size()));
+    }
+    if (g_svc == SVC_OK && g_availDirty && g_tab != TAB_AVAILABLE && !g_bgRunning && g_mode == MODE_GRID) {   // игра докачалась: «Доступные» обновляем в фоне
+        const int q[1] = { TAB_AVAILABLE };
+        if (bg_start(q, 1, true)) g_availDirty = false;
+    }
     if (g_svc == SVC_OK && (g_tab == TAB_AVAILABLE || g_tab == TAB_INSTALLED || g_tab == TAB_CATALOG)) {
         bool isAvail = g_tab == TAB_AVAILABLE;
+        bool waitBg = g_bgLoading[g_tab];   // этот список уже собирается в фоне: ждём его, а не грузим второй раз
+        if (waitBg && g_load != LS_LOADING) g_load = LS_LOADING;
         bool availDirty = isAvail && g_availDirty && g_mode == MODE_GRID && g_load != LS_LOADING;
-        bool wantLoad = (isAvail ? first : g_load == LS_NONE) || availDirty || (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_SQUARE));
+        bool wantLoad = !waitBg && ((isAvail ? g_availFirst : g_load == LS_NONE) || availDirty || (g_mode == MODE_GRID && (pressed & ORBIS_PAD_BUTTON_SQUARE)));
         if (wantLoad && g_load != LS_LOADING) {
-            g_freshScan = isAvail && !first;
-            if (isAvail) { first = false; g_availDirty = false; }
+            g_freshScan = isAvail && !g_availFirst;
+            if (isAvail) { g_availFirst = false; g_availDirty = false; }
             g_load = LS_LOADING;
             g_redraw = 2;
         }
@@ -2490,7 +2589,7 @@ void ui_pump()
 
     // Загрузка списка: сначала на экране показывается «Загрузка...», потом (после показа кадра) запрос идёт в отдельном потоке,
     // а главный поток тем временем крутит крутилку.
-    if (drew && g_load == LS_LOADING && g_redraw == 1 && !g_workerBusy) {
+    if (drew && g_load == LS_LOADING && g_redraw == 1 && !g_workerBusy && !g_bgLoading[g_tab]) {
         g_workerBusy = true;
         pthread_t th;
         if (pthread_create(&th, nullptr, load_worker, nullptr) == 0) pthread_detach(th);

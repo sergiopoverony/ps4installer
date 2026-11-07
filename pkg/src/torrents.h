@@ -32,6 +32,10 @@ std::map<std::string, ReqStatus> torrents_poll(const std::vector<std::string>& h
 // Хэш в нижний регистр; "" если это не 40 символов hex.
 std::string torrents_clean_hash(const std::string& h);
 
+// То же, но без лишних запросов: онлайн-результат помним 20 секунд; офлайн - 10 секунд для окна игры (background=false)
+// и всё дольше для фоновых проверок (background=true): 15 с, 30 с, 1 мин ... до 10 минут, пока связи нет. Появилась связь - счётчик сбрасывается.
+bool net_online_cached(int timeout_ms, bool background);
+
 // Отвечает ли ps4torrent (запущен ли он сейчас).
 bool torrents_running(int timeout_ms);
 

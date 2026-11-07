@@ -214,7 +214,7 @@ def media_for(row, log):
     return cover, shots
 
 
-def merge(data_dir, table_path, media=True, log=print):
+def merge(data_dir, table_path, media=True, log=print, cache_dir=None):
     data_dir = Path(data_dir)
     cj, pk = data_dir / "catalog.json", data_dir / "catalog.pak"
     doc = json.loads(cj.read_text(encoding="utf-8"))
@@ -231,7 +231,7 @@ def merge(data_dir, table_path, media=True, log=print):
             g.pop(k, None)
 
     global CACHE
-    CACHE = data_dir / ".media_cache"
+    CACHE = Path(cache_dir) if cache_dir else data_dir / ".media_cache"
     CACHE.mkdir(exist_ok=True)
     table = read_table(table_path)
     by_code, by_name = {}, {}

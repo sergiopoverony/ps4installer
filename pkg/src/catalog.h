@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-struct CatRef { uint64_t off = 0, len = 0; };
+struct CatRef { uint64_t off = 0, len = 0; int pak = 0; };   // pak: 0 - основной catalog.pak, N - заплатка catalog_N.pak
 
 struct CatEntry {
     std::string id, cid, title_id;   // title_id вынут из cid (CUSA12345)
@@ -19,7 +19,11 @@ struct CatEntry {
 };
 
 // Загрузка индекса. dir - папка с catalog.json и catalog.pak. false, если каталога нет (приложение работает и без него).
-bool catalog_load(const std::string& dir);
+// patchDir - папка с заплатками catalog_2.json (+ catalog_2.pak), catalog_3.json ... (по умолчанию та же); они применяются по порядку номеров.
+bool catalog_load(const std::string& dir, const std::string& patchDir = "");
+// Сколько заплаток применено при последней загрузке и номер последней (0 - заплаток нет).
+int catalog_patch_count();
+int catalog_patch_last();
 int catalog_count();
 const CatEntry* catalog_by_title_id(const std::string& title_id);
 const CatEntry* catalog_at(int i);
