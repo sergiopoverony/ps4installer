@@ -2316,7 +2316,8 @@ void ui_pump()
 
     if (g_svc == SVC_OK) {   // свободное место: фоновый ответ службы, раз в 15 секунд на вкладках «Каталог» и «Избранное»
         static uint64_t lastSpace = 0;
-        if ((g_tab == TAB_CATALOG || g_tab == TAB_REQUESTS) && now - lastSpace >= 15000000ULL) { lastSpace = now; space_kick(); }
+        // пока значение не получено ни разу - повторяем каждые 2 секунды, потом раз в 15
+        if ((g_tab == TAB_CATALOG || g_tab == TAB_REQUESTS) && now - lastSpace >= (g_spOk ? 15000000ULL : 2000000ULL)) { lastSpace = now; space_kick(); }
         if (space_apply()) {
             if (g_mode == MODE_CONFIRM && (g_cardReason == CARD_FAV || g_cardReason == CARD_REQUEST)) {
                 g_freeOk = g_spOk; g_freeBytes = g_spFree; g_totalBytes = g_spTotal;

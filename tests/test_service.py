@@ -336,7 +336,7 @@ class ServiceTests(unittest.TestCase):
         self.srv = Server(extra=[])
         item = [x for x in self.srv.get("/scan")[1]["packages"] if x["path"] == p][0]
         self.assertTrue(item["incomplete"])
-        self.assertGreaterEqual(item["zero_blocks"], 2)
+        self.assertGreaterEqual(item["zero_blocks"], 6)
         code, j = self.srv.post("/install", {"paths": [p]})
         self.assertEqual(j["skipped"][0]["reason"], "incomplete")
 

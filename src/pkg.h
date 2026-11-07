@@ -29,7 +29,7 @@ struct PkgInfo {
     // Торрент-клиент создаёт файл сразу полного размера, а непришедшие куски остаются нулями.
     // Поэтому ещё берём пробы из разных мест файла (pkg_probe_zeros); нулевых проб много - файл не докачан.
     int zero_blocks = 0;   // сколько проб из набора оказалось сплошь из нулей
-    bool incomplete() const { return (pkg_size > 0 && file_size < pkg_size) || zero_blocks >= 2; }
+    bool incomplete() const { return (pkg_size > 0 && file_size < pkg_size) || zero_blocks >= 6; }   // у целого PKG бывают 1-5 нулевых блоков (выравнивание); у недокачанного торрента нулей много
     // из param.sfo внутри PKG (необязательно: пусто, если прочитать не удалось)
     std::string title;       // TITLE
     std::string app_ver;     // APP_VER, например "01.04"
