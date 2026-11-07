@@ -105,13 +105,27 @@ def read_table(path):
 CACHE = None   # папка с уже скачанными картинками: при повторном запуске их не качаем заново
 
 
-def download(url, tries=3, delay=0.4):
-    cf = None
-    if CACHE is not None:
-        cf = CACHE / (hashlib.sha1(url.encode("utf-8")).hexdigest() + ".bin")
+class Permanent(Exception):
+    """Адрес больше не существует (404 и т.п.): повторять бессмысленно."""
+
+
+def _cache_file(url):
+    return CACHE / (hashlib.sha1(url.encode("utf-8")).hexdigest() + ".bin") if CACHE is not None else None
+
+
+def download(url, tries=2, delay=0.2):
+    cf = _cache_file(url)
+    if cf is not None:
         if cf.exists():
             return cf.read_bytes()
-    data = _download(url, tries, delay)
+        if cf.with_suffix(".gone").exists():
+            raise Permanent("картинки уже нет (404)")
+    try:
+        data = _download(url, tries, delay)
+    except Permanent:
+        if cf is not None:
+            cf.with_suffix(".gone").write_bytes(b"")
+        raise
     if cf is not None:
         cf.write_bytes(data)
     return data
@@ -123,11 +137,43 @@ def _download(url, tries, delay):
         time.sleep(delay)
         try:
             req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0", "Referer": "https://rutracker.org/"})
-            with urllib.request.urlopen(req, timeout=25) as r:
+            with urllib.request.urlopen(req, timeout=12) as r:
                 return r.read()
-        except Exception as e:   # сеть, 404, защита от хотлинка: пробуем ещё, потом сдаёмся
+        except urllib.error.HTTPError as e:
+            if e.code in (404, 410):
+                raise Permanent("HTTP Error %d" % e.code)
+            last = e
+        except Exception as e:   # сеть, таймаут, защита от хотлинка: пробуем ещё, потом сдаёмся
             last = e
     raise last
+
+
+def prefetch(rows, log, workers=16):
+    """Скачивает все нужные картинки параллельно в кэш; дальше media_for берёт их уже из кэша."""
+    urls = []
+    for r in rows:
+        cu = (r.get("Обложка (URL)") or "").strip()
+        if cu:
+            urls.append(cu)
+        urls.extend((r.get("Скриншоты (URL)") or "").split()[:FC.MAX_SHOTS])
+    urls = [u for u in dict.fromkeys(urls) if not (_cache_file(u).exists() or _cache_file(u).with_suffix(".gone").exists())]
+    if not urls:
+        return
+    log("скачиваю картинки параллельно: %d шт., потоков %d" % (len(urls), workers))
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(u):
+        try:
+            download(u)
+        except Exception:
+            pass
+
+    done = 0
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        for _ in ex.map(one, urls):
+            done += 1
+            if done % 200 == 0:
+                log("  скачано %d из %d" % (done, len(urls)))
 
 
 def fit_whole(data, size, quality=88):
@@ -242,6 +288,8 @@ def merge(data_dir, table_path, media=True, log=print):
         if id(r) not in used:
             rest.setdefault(norm(r["Название"]) or hash_of(r), []).append(r)
     extras = []
+    if media:
+        prefetch([sorted(v, key=rank, reverse=True)[0] for v in rest.values()], log)
     with open(pk, "r+b") as pak:
         pak.seek(0, 2)
         pos = pak.tell()
