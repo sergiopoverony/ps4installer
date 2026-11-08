@@ -477,7 +477,7 @@ static const Color C_BAR_USED  = { 70, 130, 230 };
 static const Color C_BAR_NEED  = { 255, 150, 40 };
 static const Color C_BAR_FREE  = { 120, 200, 150 };
 
-enum Mode { MODE_GRID = 0, MODE_CONFIRM, MODE_PROGRESS, MODE_DELETE, MODE_OPTIONS };
+enum Mode { MODE_GRID = 0, MODE_CONFIRM, MODE_PROGRESS, MODE_DELETE, MODE_OPTIONS, MODE_DONATE };
 static Mode g_mode = MODE_GRID;
 static Mode g_deleteFrom = MODE_GRID;      // откуда открыли подтверждение удаления (сетка или окно игры)
 static std::string g_deleteErr;
@@ -1753,11 +1753,11 @@ static void lang_cycle(int dir)
     lang_apply(cur == 0 ? std::string() : std::string(LANGS[cur - 1].code), true);
 }
 
-static const int OPT_N = 4;   // язык / пусто / пусто / закрыть приложение
+static const int OPT_N = 3;   // язык / поддержать проект / закрыть приложение
 
 static std::string opt_label(int i)
 {
-    return i == 0 ? lang_label() : i == OPT_N - 1 ? tr("opt.quit") : tr("opt.empty");
+    return i == 0 ? lang_label() : i == OPT_N - 1 ? tr("opt.quit") : tr("opt.donate");
 }
 
 static void draw_options()
@@ -1777,9 +1777,45 @@ static void draw_options()
         Color bg = i == g_optCur ? C_TAB_ON : C_TILE;
         fill(x + 40, ry, W - 80, ROW - 10, bg);
         std::string t = fit_chars(opt_label(i), (W - 140) / g_cellW);
-        draw_text(t, x + 70, ry + (ROW - 10) / 2 + FONT_PX / 3, (i == 1 || i == 2) ? C_DIM : C_TEXT, bg);
+        draw_text(t, x + 70, ry + (ROW - 10) / 2 + FONT_PX / 3, C_TEXT, bg);
     }
     std::string h = tr("hint.opt");
+    draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
+}
+
+// Окно «Поддержать проект»: QR-код пожертвований по языку интерфейса - русский: СБП, любой другой: PayPal (как в ps4torrent).
+static CatImage g_qrImg;
+static std::string g_qrFile;   // какой файл сейчас в g_qrImg
+static bool g_qrFailed = false;
+static const int QR_SIZE = 440;
+
+static void draw_donate()
+{
+    std::string code = g_langChoice.empty() ? i18n_code_for_system_lang(g_sysLang) : g_langChoice;
+    const char* file = code == "ru" ? "/app0/assets/images/qr_sbp.png" : "/app0/assets/images/qr_paypal.png";
+    if (g_qrFile != file) {
+        g_qrFile = file; g_qrFailed = false; g_qrImg = CatImage();
+        std::string blob;
+        if (FILE* f = fopen(file, "rb")) {
+            char buf[4096]; size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0) blob.append(buf, n);
+            fclose(f);
+        }
+        if (blob.empty() || !catalog_image_from_blob(blob, QR_SIZE, QR_SIZE, g_qrImg)) { g_qrFailed = true; logf_("ui: QR %s не загружен", file); }
+    }
+    const int W = 580, H = 640;
+    int x = (FRAME_WIDTH - W) / 2, y = (FRAME_HEIGHT - H) / 2;
+    draw_panel(x, y, W, H);
+    std::string title = tr("opt.donate");
+    draw_text(title, x + (W - text_w(title)) / 2, y + 62, C_TEXT, C_PANEL);
+    if (!g_qrFailed && g_qrImg.ok()) {
+        fill(x + (W - QR_SIZE) / 2 - 12, y + 90, QR_SIZE + 24, QR_SIZE + 24, Color{255, 255, 255});   // белое поле вокруг кода
+        blit(g_qrImg, x + (W - QR_SIZE) / 2, y + 102);
+    } else {
+        std::string m = tr("opt.donate_missing");
+        draw_text(m, x + (W - text_w(m)) / 2, y + H / 2, C_DIM, C_PANEL);
+    }
+    std::string h = tr("hint.fav_close");
     draw_hint(h, x + (W - hint_w(h)) / 2, y + H - 36, C_TEXT, C_PANEL);
 }
 
@@ -1834,6 +1870,7 @@ static void draw_all()
     if (g_svc == SVC_OK && (g_mode == MODE_CONFIRM || (g_mode == MODE_DELETE && g_deleteFrom == MODE_CONFIRM))) draw_confirm();
     if (g_svc == SVC_OK && g_mode == MODE_DELETE) draw_delete();
     if (g_mode == MODE_OPTIONS) draw_options();
+    if (g_mode == MODE_DONATE) draw_donate();
     if (g_svc == SVC_OK && g_mode == MODE_PROGRESS) draw_progress();
 
     // Идёт установка, а окно скрыто: короткая строка под сеткой
@@ -2204,12 +2241,17 @@ void ui_pump()
         if (dy) { g_optCur = (g_optCur + dy + OPT_N) % OPT_N; g_redraw = 2; }
         if (pressed & ORBIS_PAD_BUTTON_CIRCLE) { g_mode = MODE_GRID; g_redraw = 2; }
         else if (g_optCur == 0 && (dx || (pressed & ORBIS_PAD_BUTTON_CROSS))) { lang_cycle(dx ? dx : 1); g_redraw = 2; }   // язык листается стрелками и Крестом, меню остаётся открытым
+        else if (g_optCur == 1 && (pressed & ORBIS_PAD_BUTTON_CROSS)) { g_mode = MODE_DONATE; g_redraw = 2; }
         else if (g_optCur == OPT_N - 1 && (pressed & ORBIS_PAD_BUTTON_CROSS)) {
             logf_("ui: закрытие приложения по меню");
             int r = sys_load_exec("exit", nullptr);   // штатный выход на главный экран; если не вышло - остаёмся в приложении
             logf_("ui: sceSystemServiceLoadExec(exit) = 0x%08X", (unsigned)r);
         }
         pressed = 0; dirs = 0;   // остальные кнопки под меню не работают
+    }
+    if (g_mode == MODE_DONATE) {
+        if (pressed & (ORBIS_PAD_BUTTON_CIRCLE | ORBIS_PAD_BUTTON_CROSS)) { g_mode = MODE_OPTIONS; g_redraw = 2; }
+        pressed = 0; dirs = 0;
     }
     int old = g_tab;
     if (g_mode == MODE_GRID) {
