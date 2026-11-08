@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <unistd.h>
 #include <sys/stat.h>
 #include <cctype>
 #include "platform.h"
