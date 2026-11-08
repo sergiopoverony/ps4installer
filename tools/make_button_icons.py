@@ -7,6 +7,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 ICON_S = 38          # квадратные кнопки
 SHOULDER = (76, 28)  # L1 / R1
+OPTIONS = (58, 28)   # Options: овал с тремя полосками
 K = 8                # во сколько раз рисуем крупнее
 OUT = Path(__file__).resolve().parent.parent / "pkg" / "assets" / "images"
 FONT = Path(__file__).resolve().parent.parent / "pkg" / "assets" / "fonts" / "DejaVuSansMono.ttf"
@@ -54,6 +55,19 @@ def shoulder_icon(label):
     return im.resize(SHOULDER, Image.Resampling.LANCZOS)
 
 
+def options_icon():
+    w, h = OPTIONS[0] * K, OPTIONS[1] * K
+    im = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    c = COL["shoulder"]
+    d.rounded_rectangle((0, 0, w - 1, h - 1), radius=h // 2, outline=c, width=int(2.6 * K))
+    lw, lx = int(2.6 * K), w * 0.30
+    for k in (-1, 0, 1):   # три горизонтальные полоски
+        y = h / 2 + k * 5.2 * K
+        d.line((lx, y, w - lx, y), fill=c, width=lw)
+    return im.resize(OPTIONS, Image.Resampling.LANCZOS)
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     for kind in ("cross", "circle", "square", "triangle"):
@@ -62,6 +76,7 @@ def main():
     shoulder_icon("R1").save(OUT / "btn_r1.png", optimize=True)
     shoulder_icon("L2").save(OUT / "btn_l2.png", optimize=True)
     shoulder_icon("R2").save(OUT / "btn_r2.png", optimize=True)
+    options_icon().save(OUT / "btn_options.png", optimize=True)
     print("Готово:", ", ".join(sorted(p.name for p in OUT.glob("btn_*.png"))))
 
 

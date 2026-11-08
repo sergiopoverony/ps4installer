@@ -137,7 +137,7 @@ static void fill(int x, int y, int w, int h, Color c) { g_scene->FillRect(x, y, 
 static const int ICON_S = 38;
 static bool is_shoulder(char k) { return k == 'L' || k == 'R' || k == 'l' || k == 'r'; }   // L1 R1 (большие буквы) и L2 R2 (маленькие)
 static double g_iconScale = 1.0;   // подсказки рисуются мельче: масштаб значков
-static int icon_w(char kind) { return (int)((is_shoulder(kind) ? ICON_S * 2 : ICON_S) * g_iconScale + 0.5); }   // плечевые кнопки шире   // плечевые кнопки шире
+static int icon_w(char kind) { return (int)((is_shoulder(kind) ? ICON_S * 2 : kind == 'P' ? 58 : ICON_S) * g_iconScale + 0.5); }   // плечевые кнопки шире   // плечевые кнопки шире
 
 // Попадает ли точка (fx, fy) внутрь рисунка значка (координаты в пикселях внутри квадрата ICON_S).
 static bool icon_sample(char kind, double fx, double fy)
@@ -176,13 +176,13 @@ static Color mix(Color a, Color b, int cov9)   // a - значок, b - фон; 
 
 // Готовые значки (pkg/assets/images/btn_*.png, их рисует tools/make_button_icons.py): гладкие края, прозрачность.
 struct IconPng { int w = 0, h = 0; std::vector<uint32_t> px; bool tried = false; };
-static IconPng g_iconPng[8];
+static IconPng g_iconPng[9];
 static IconPng g_logoPng;
 
 static IconPng* icon_png(char kind)
 {
-    static const char kinds[] = "XOSTLRlr";
-    static const char* names[] = { "cross", "circle", "square", "triangle", "l1", "r1", "l2", "r2" };
+    static const char kinds[] = "XOSTLRlrP";   // P - кнопка Options
+    static const char* names[] = { "cross", "circle", "square", "triangle", "l1", "r1", "l2", "r2", "options" };
     const char* p = strchr(kinds, kind);
     if (!p || !kind) return nullptr;
     int i = (int)(p - kinds);
@@ -251,7 +251,7 @@ static void draw_pad_icon(char kind, int x, int top, Color bg = C_BG)
     if (IconPng* ic = icon_png(kind)) {
         double sc = g_iconScale;
         int dw = (int)(ic->w * sc + 0.5), dh = (int)(ic->h * sc + 0.5);
-        int y0 = is_shoulder(kind) ? top + (int)((ICON_S - ic->h) * sc / 2) : top;
+        int y0 = (is_shoulder(kind) || kind == 'P') ? top + (int)((ICON_S - ic->h) * sc / 2) : top;
         for (int yy = 0; yy < dh; yy++)
             for (int xx = 0; xx < dw; xx++) {
                 // усредняем 2x2 точки исходного значка (при sc = 1 это ровно его пиксель)
@@ -1890,6 +1890,7 @@ static void draw_all()
     else if (g_tab == TAB_AVAILABLE && g_mode == MODE_GRID)
         hint = g_instActive ? tr("hint.avail_busy") : tr("hint.avail");
     else if (g_mode != MODE_GRID) hint = "";
+    if (g_mode == MODE_GRID) hint += (hint.empty() ? "" : "      ") + tr("hint.menu");   // кнопка Options везде открывает меню
     draw_hint(hint, (FRAME_WIDTH - hint_w(hint)) / 2, FRAME_HEIGHT - 40, C_DIM, C_BG);
     {   // версия и авторы: мелко и темно, в правом нижнем углу
         FT_Set_Pixel_Sizes(g_font, 0, 20);

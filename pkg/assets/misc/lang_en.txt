@@ -111,3 +111,4 @@ fav.add_q=Add the game to favorites?
 card.year=Year: {1}
 req.peers=peers: {1}
 req.nopeers=waiting for peers
+hint.menu={P} - menu
