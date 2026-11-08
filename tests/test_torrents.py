@@ -19,14 +19,10 @@ class H(http.server.BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if self.path.startswith("/ann?"):   # подставной трекер: announce -> bencode со счётчиками
-            ok = ("info_hash=" + "".join("%" + L2[i:i + 2] for i in range(0, 40, 2))) in self.path
-            body = b"d8:completei12e10:incompletei3e8:intervali1800ee" if ok else b"d14:failure reason3:badee"
-            self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body); return
         if self.path != "/status":
             self.send_response(404); self.end_headers(); return
         body = json.dumps({"items": [
-            {"hash": L2.upper(), "status": "downloading", "pct": 42},
+            {"hash": L2.upper(), "status": "downloading", "pct": 42, "peers": 5},
             {"hash": L3, "status": "complete", "pct": 100},
             {"hash": "1" * 40, "status": "paused", "pct": 7},
         ]}).encode()

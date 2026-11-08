@@ -56,7 +56,7 @@ int main(int argc, char** argv)
     CHECK(st["bad"].state == RS_GONE);
     torrents_cancel(L2);
     st = torrents_poll(hs);
-    CHECK(st[L2].state == RS_DOWNLOADING && st[L2].pct == 42);
+    CHECK(st[L2].state == RS_DOWNLOADING && st[L2].pct == 42 && st[L2].peers == 5);   // peers из /status
     CHECK(!torrents_pending(L2));
     torrents_cancel(L1);
     CHECK(!torrents_pending(L1));
@@ -73,15 +73,6 @@ int main(int argc, char** argv)
         CHECK(net_resolve_dns("bt.t-ru.org", "127.0.0.1", atoi(argv[3]), &ip, 2000));
         CHECK(strcmp(inet_ntoa(ip), "10.1.2.3") == 0);
         CHECK(!net_resolve_dns("bt.t-ru.org", "127.0.0.1", 1, &ip, 300));   // сервера нет: ответа нет
-    }
-
-    // раздающие: announce на подставной трекер (тот же порт), нужный хэш -> 12 / 3; ответ-ошибка -> нет данных
-    {
-        torrents_configure_tracker("127.0.0.1", port);
-        int s = -1, l = -1;
-        CHECK(torrents_peer_stats(L2, s, l) && s == 12 && l == 3);
-        CHECK(!torrents_peer_stats(L1, s, l));
-        CHECK(!torrents_peer_stats("abc", s, l));
     }
 
     // имя файла magnet и запись на «флешку»

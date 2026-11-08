@@ -107,6 +107,7 @@ std::map<std::string, ReqStatus> torrents_poll(const std::vector<std::string>& h
             ReqStatus s;
             std::string st = it["status"].asStr();
             s.pct = (int)it["pct"].asInt();
+            s.peers = (int)it["peers"].asInt();   // сколько раздающих подключено сейчас
             if (st == "complete") { s.state = RS_DONE; s.pct = 100; }
             else if (st == "downloading" || st == "checking") s.state = RS_DOWNLOADING;
             else if (st == "paused") s.state = RS_PAUSED;
@@ -177,68 +178,4 @@ bool net_online_cached(int timeout_ms, bool background)
     g_netLast = ok;
     if (ok) g_netFails = 0; else if (g_netFails < 10) g_netFails++;
     return ok;
-}
-
-const char* PEER_API_HOST = "api.t-ru.org";
-static std::string g_trHost = "bt.t-ru.org";   // трекер рутрекера (тот же, что в magnet): сюда идёт обычный announce
-static int g_trPort = 80;
-
-void torrents_configure_tracker(const std::string& host, int port) { g_trHost = host; g_trPort = port; }
-
-static std::string hex_to_pct(const std::string& hex)   // 40 hex -> %XX%XX... (20 байт info_hash)
-{
-    std::string o;
-    for (size_t i = 0; i + 1 < hex.size(); i += 2) { o += '%'; o += hex[i]; o += hex[i + 1]; }
-    return o;
-}
-
-// В ответе трекера (bencode) число после ключа: "8:completei12e" -> 12. -1, если ключа нет.
-static int bencode_int(const std::string& body, const char* key)
-{
-    std::string k = std::to_string(strlen(key)) + ":" + key + "i";
-    size_t p = body.find(k);
-    if (p == std::string::npos) return -1;
-    p += k.size();
-    size_t e = body.find('e', p);
-    if (e == std::string::npos || e == p) return -1;
-    return atoi(body.substr(p, e - p).c_str());
-}
-
-static bool peer_stats_announce(const std::string& hash, int& seeders, int& leechers, std::string* raw)
-{
-    // numwant=0: список раздающих не нужен, только счётчики complete / incomplete. event=stopped: трекер нас в раздающие не записывает.
-    std::string path = "/ann?magnet&info_hash=" + hex_to_pct(hash) + "&peer_id=-PI0001-000000000000&port=6881&uploaded=0&downloaded=0&left=1&compact=1&numwant=0&event=stopped";
-    HttpResult r = http_get(g_trHost, g_trPort, path, 4000);
-    if (raw) *raw = "announce[подключились=" + std::to_string(r.connected) + " код=" + std::to_string(r.status) + " тело=" + r.body.substr(0, 150) + "]";
-    if (!r.connected || r.status != 200) return false;
-    int c = bencode_int(r.body, "complete"), i = bencode_int(r.body, "incomplete");
-    if (c < 0 && i < 0) return false;
-    seeders = c < 0 ? 0 : c;
-    leechers = i < 0 ? 0 : i;
-    return true;
-}
-
-static bool peer_stats_api(const std::string& hash, int& seeders, int& leechers, std::string* raw)
-{
-    HttpResult r = http_get(PEER_API_HOST, 80, "/v1/get_peer_stats?by=hash&val=" + hash, 4000);
-    if (raw) *raw += " api[подключились=" + std::to_string(r.connected) + " код=" + std::to_string(r.status) + " тело=" + r.body.substr(0, 150) + "]";
-    if (!r.connected || r.status != 200) return false;
-    JsonValue j;
-    if (!json_parse(r.body, j)) return false;
-    const JsonValue& res = j["result"];   // {"<хэш>": [раздающих, качающих, когда последний раздающий был]}
-    if (res.type != JsonValue::OBJ || res.obj.empty()) return false;
-    const JsonValue& a = res.obj[0].second;
-    if (a.type != JsonValue::ARR || a.arr.size() < 2) return false;
-    seeders = (int)a.arr[0].asInt();
-    leechers = (int)a.arr[1].asInt();
-    return true;
-}
-
-bool torrents_peer_stats(const std::string& hash, int& seeders, int& leechers, std::string* raw)
-{
-    seeders = leechers = 0;
-    if (hash.size() != 40) return false;
-    if (g_trHost == "bt.t-ru.org" && !net_online_cached(800, true)) return false;   // нет интернета - запросов нет (в проверках трекер подменён)
-    if (peer_stats_announce(hash, seeders, leechers, raw)) return true;
-    return peer_stats_api(hash, seeders, leechers, raw);
 }

@@ -1298,7 +1298,10 @@ static void draw_requests()
                         break;
                     }
                     case RS_QUEUED: st = tr("req.st_queue"); break;
-                    case RS_DOWNLOADING: st = trf("req.st_dl", std::to_string(rs.pct)); sc = C_GREEN; break;
+                    case RS_DOWNLOADING:
+                        st = trf("req.st_dl", std::to_string(rs.pct)) + " · " + (rs.peers > 0 ? trf("req.peers", std::to_string(rs.peers)) : tr("req.nopeers"));
+                        sc = rs.peers > 0 ? C_GREEN : C_WARN;
+                        break;
                     case RS_PAUSED: st = trf("req.st_paused", std::to_string(rs.pct)); break;
                     case RS_DONE: st = tr("req.st_done"); sc = C_GREEN; break;
                     case RS_NOSVC: st = tr("fav.start_client"); sc = C_WARN; break;
@@ -1458,12 +1461,6 @@ static void draw_info_top(const Game& g, int x, int y, int W)
 
 static const int SPACE_PX = 22;   // подписи «Нужно» / «Свободно»
 static const int SPACE_INFO_H = 14 + 10 + 2 * (SPACE_PX + 8);
-// Живая проверка раздающих (только «Избранное», только если есть интернет): состояние для открытой карточки.
-struct PeerJob { volatile int state; std::string hash; int seeds, leech; bool ok; };
-static PeerJob g_peerJob = { 0, std::string(), 0, 0, false };
-static int g_peerSeeds = 0, g_peerLeech = 0;
-static bool g_peerShow = false;      // есть что показывать (без интернета или без ответа - ничего не показываем)
-static bool g_peerWait = false;      // проверка идёт
 static int g_selYear = 0;            // год выпуска открытой карточки (0 - неизвестен)
 static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = false, bool extra = false)
 {
@@ -1497,13 +1494,6 @@ static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = fal
     draw_text(b, center ? x + (w - count_cp(b) * cell) / 2 : x, ly + SPACE_PX + 8, g_freeOk ? C_BAR_FREE : C_WARN, C_PANEL);
     int ey = ly + 2 * (SPACE_PX + 8) - 4;   // дальше - год выпуска (из каталога) и раздающие (только «Избранное» и только с интернетом)
     if (extra && g_selYear > 0) { draw_text(trf("card.year", std::to_string(g_selYear)), x, ey, C_DIM, C_PANEL); ey += SPACE_PX + 4; }
-    if (extra && g_cardReason == CARD_FAV) {
-        if (g_peerShow) {
-            bool none = g_peerSeeds <= 0;
-            std::string t = none ? tr("card.noseeds") : trf("card.seeds", std::to_string(g_peerSeeds), std::to_string(g_peerLeech));
-            draw_text(t, x, ey, none ? C_WARN : C_BAR_FREE, C_PANEL);
-        } else if (g_peerWait) draw_text(tr("card.seeds_wait"), x, ey, C_DIM, C_PANEL);
-    }
     FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
     return SPACE_INFO_H;
 }
@@ -2096,29 +2086,6 @@ static void* net_thread(void*)
     return nullptr;
 }
 
-static void* peer_thread(void*)
-{
-    int s = 0, l = 0;
-    std::string raw;
-    bool ok = torrents_peer_stats(g_peerJob.hash, s, l, &raw);
-    logf_("ui: раздающие %s: %s (%d/%d) ответ: %s", g_peerJob.hash.c_str(), ok ? "есть" : "нет данных", s, l, raw.c_str());
-    g_peerJob.ok = ok; g_peerJob.seeds = s; g_peerJob.leech = l;
-    __sync_synchronize();
-    g_peerJob.state = 2;
-    return nullptr;
-}
-
-static void peer_kick(const std::string& hash)
-{
-    if (hash.size() != 40 || g_peerJob.state != 0) return;
-    g_peerJob.hash = hash;
-    g_peerJob.state = 1;
-    g_peerWait = true;
-    pthread_t t;
-    if (pthread_create(&t, nullptr, peer_thread, nullptr) != 0) { g_peerJob.state = 0; g_peerWait = false; return; }
-    pthread_detach(t);
-}
-
 static void fav_case_compute()
 {
     g_favUsb.clear();
@@ -2146,7 +2113,6 @@ static void fav_case_finish()
     g_favUsb = g_netJob.usb;
     g_netJob.state = 0;
     if (!online) { g_favCase = FC_USB; return; }
-    peer_kick(g_sel.hash);   // интернет есть: спрашиваем раздающих в фоне
     if (!installed) { g_favCase = FC_NO_CLIENT; return; }
     if (!running) { g_favCase = FC_NOT_RUNNING; return; }
     g_favCase = FC_DOWNLOAD;
@@ -2380,15 +2346,6 @@ void ui_pump()
         g_redraw = 2;
     }
 
-    if (g_peerJob.state == 2) {   // ответ про раздающих: показываем только для той раздачи, чья карточка открыта
-        __sync_synchronize();
-        g_peerWait = false;
-        if (g_mode == MODE_CONFIRM && g_cardReason == CARD_FAV && g_peerJob.hash == g_sel.hash && g_peerJob.ok) {
-            g_peerShow = true; g_peerSeeds = g_peerJob.seeds; g_peerLeech = g_peerJob.leech;
-        }
-        g_peerJob.state = 0;
-        g_redraw = 2;
-    }
     if (g_mode == MODE_CONFIRM && g_cardReason == CARD_FAV && g_favCase == FC_CHECK && g_netJob.state == 2) {
         fav_case_finish();
         g_confirmGuard = now + 500000;   // кнопки после появления вопроса - с задержкой, чтобы случайный повтор не сработал
@@ -2433,7 +2390,6 @@ void ui_pump()
                 g_cardReason = CARD_FAV;
                 g_selYear = g_sel.year;
                 if (g_selYear <= 0) { const CatEntry* ce = catalog_find(g_sel.title_id, g_sel.title); if (ce) g_selYear = ce->year; }
-                g_peerShow = false; g_peerWait = false;   // раздающих покажем, только если подтвердится интернет
                 g_confirmErr.clear();
                 g_confirmOk = false;
                 g_favDone = false;
