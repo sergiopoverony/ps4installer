@@ -1284,8 +1284,8 @@ static void draw_requests()
         draw_text(fit_chars(g.title, (sx0 - tx - 30) / g_cellW), tx, ty, C_TEXT, bg);
         draw_text(g.title_id, sx0 + SPW - text_w(g.title_id), ty, C_DIM, bg);
         {   // статус
-            std::string st;
-            Color sc = C_DIM;
+            std::string st, av;   // av - доступность раздачи, правее статуса
+            Color sc = C_DIM, ac = C_DIM;
             if (!g.requested) st = tr(g.usbOnly ? "req.st_usb" : "req.st_fav");
             else if (known && (size_t)idx < g_reqStatus.size()) {
                 const ReqStatus& rs = g_reqStatus[(size_t)idx];
@@ -1299,8 +1299,9 @@ static void draw_requests()
                     }
                     case RS_QUEUED: st = tr("req.st_queue"); break;
                     case RS_DOWNLOADING:
-                        st = trf("req.st_dl", std::to_string(rs.pct)) + " · " + (rs.peers > 0 ? trf("req.peers", std::to_string(rs.peers)) : tr("req.nopeers"));
-                        sc = rs.peers > 0 ? C_GREEN : C_WARN;
+                        st = trf("req.st_dl", std::to_string(rs.pct)); sc = C_GREEN;
+                        if (rs.peers > 0) { av = trf("req.peers", std::to_string(rs.peers)); ac = C_GREEN; }
+                        else { av = tr("req.nopeers"); ac = C_WARN; }
                         break;
                     case RS_PAUSED: st = trf("req.st_paused", std::to_string(rs.pct)); break;
                     case RS_DONE: st = tr("req.st_done"); sc = C_GREEN; break;
@@ -1308,7 +1309,10 @@ static void draw_requests()
                     default: st = tr("req.st_gone"); break;
                 }
             }
-            if (!st.empty()) draw_text(fit_chars(st, (sx0 - tx - 30) / g_cellW), tx, ty + 44, sc, bg);
+            int room = sx0 - tx - 30;
+            int avW = av.empty() ? 0 : count_cp(av) * g_cellW;
+            if (!st.empty()) draw_text(fit_chars(st, (room - (avW ? avW + 24 : 0)) / g_cellW), tx, ty + 44, sc, bg);
+            if (avW) draw_text(av, tx + room - avW, ty + 44, ac, bg);   // справа от статуса, у края
         }
         if (g.size > 0 && g_spOk && g_spFree > 0) {   // полоска места, как в карточках игр
             const int bh = 14;

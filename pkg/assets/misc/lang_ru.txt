@@ -109,4 +109,4 @@ fav.start_client=Запустите PS4Torrent Client
 fav.add_q=Добавить игру в избранное?
 card.year=Год выпуска: {1}
 req.peers=раздают: {1}
-req.nopeers=раздающих нет
+req.nopeers=ожидание раздачи

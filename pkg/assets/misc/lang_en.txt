@@ -109,4 +109,4 @@ fav.start_client=Start the PS4Torrent Client
 fav.add_q=Add the game to favorites?
 card.year=Year: {1}
 req.peers=peers: {1}
-req.nopeers=no peers
+req.nopeers=waiting for peers
