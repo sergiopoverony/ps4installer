@@ -209,7 +209,7 @@ static bool peer_stats_announce(const std::string& hash, int& seeders, int& leec
     // numwant=0: список раздающих не нужен, только счётчики complete / incomplete. event=stopped: трекер нас в раздающие не записывает.
     std::string path = "/ann?magnet&info_hash=" + hex_to_pct(hash) + "&peer_id=-PI0001-000000000000&port=6881&uploaded=0&downloaded=0&left=1&compact=1&numwant=0&event=stopped";
     HttpResult r = http_get(g_trHost, g_trPort, path, 4000);
-    if (raw) *raw = r.body.substr(0, 200);
+    if (raw) *raw = "announce[подключились=" + std::to_string(r.connected) + " код=" + std::to_string(r.status) + " тело=" + r.body.substr(0, 150) + "]";
     if (!r.connected || r.status != 200) return false;
     int c = bencode_int(r.body, "complete"), i = bencode_int(r.body, "incomplete");
     if (c < 0 && i < 0) return false;
@@ -221,7 +221,7 @@ static bool peer_stats_announce(const std::string& hash, int& seeders, int& leec
 static bool peer_stats_api(const std::string& hash, int& seeders, int& leechers, std::string* raw)
 {
     HttpResult r = http_get(PEER_API_HOST, 80, "/v1/get_peer_stats?by=hash&val=" + hash, 4000);
-    if (raw && raw->empty()) *raw = r.body.substr(0, 200);
+    if (raw) *raw += " api[подключились=" + std::to_string(r.connected) + " код=" + std::to_string(r.status) + " тело=" + r.body.substr(0, 150) + "]";
     if (!r.connected || r.status != 200) return false;
     JsonValue j;
     if (!json_parse(r.body, j)) return false;
