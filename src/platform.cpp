@@ -81,6 +81,12 @@ std::vector<InstalledGame> installed_games() {
     }
     return out;
 }
+std::string app_pkg_path(const std::string& title_id) {
+    const char* d = getenv("FAKE_APPMETA");   // на ПК: FAKE_APPMETA/<ID>/app.pkg
+    if (!d) return "";
+    std::string p = std::string(d) + "/" + title_id + "/app.pkg";
+    return access(p.c_str(), R_OK) == 0 ? p : "";
+}
 std::string app_icon_path(const std::string& title_id) {
     const char* d = getenv("FAKE_APPMETA");
     if (!d) return "";
@@ -436,6 +442,12 @@ std::vector<InstalledGame> installed_games() {
                 if (!f.empty()) pkg_sfo_title_from_file(f, &t);
             }
         }
+        if (t.empty()) {   // игра на EXT: название внутри app.pkg
+            std::string ap = app_pkg_path(out[i].title_id);
+            PkgInfo pi;
+            std::string err;
+            if (!ap.empty() && pkg_read_header(ap, &pi, &err)) t = pi.title;
+        }
         if (t.empty()) {
             std::vector<std::string> pl = meta_places(out[i]);
             for (size_t k = 0; k < pl.size(); k++) {
@@ -446,6 +458,15 @@ std::vector<InstalledGame> installed_games() {
         out[i].title = t;
     }
     return out;
+}
+
+std::string app_pkg_path(const std::string& title_id) {
+    std::vector<std::pair<std::string, std::string> > roots = app_roots();
+    for (size_t r = roots.size(); r-- > 0;) {   // EXT первым
+        std::string p = roots[r].first + "/" + title_id + "/app.pkg";
+        if (access(p.c_str(), R_OK) == 0) return p;
+    }
+    return "";
 }
 
 std::string app_icon_path(const std::string& title_id) {

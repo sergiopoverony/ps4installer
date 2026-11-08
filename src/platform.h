@@ -22,6 +22,8 @@ struct InstalledGame {
 std::vector<InstalledGame> installed_games();
 // Путь к icon0.png установленной игры или пустая строка. На ПК: папка FAKE_APPMETA/<ID>/icon0.png.
 std::string app_icon_path(const std::string& title_id);
+// app.pkg установленной игры (на EXT вместо sce_sys лежит он: название и иконка читаются из него). Пусто, если нет.
+std::string app_pkg_path(const std::string& title_id);
 // Запуск установленной игры. Не проверено на консоли. На ПК: пишет Title ID в файл FAKE_LAUNCH_LOG.
 bool launch_app(const std::string& title_id, std::string* err);
 // Удаление установленной игры вместе с данными. Не проверено на консоли. На ПК: пишет Title ID в FAKE_UNINSTALL_LOG.

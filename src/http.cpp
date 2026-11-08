@@ -182,6 +182,15 @@ Response route(const Request& rq) {
         for (const std::string& t : platform::installed_title_ids()) known = known || t == id;
         std::string p = known ? platform::app_icon_path(id) : "";
         FILE* f = p.empty() ? nullptr : fopen(p.c_str(), "rb");
+        if (!f && known) {   // нет icon0.png рядом: иконка внутри app.pkg (игры на EXT)
+            std::string ap = platform::app_pkg_path(id);
+            std::vector<uint8_t> icon;
+            if (!ap.empty() && pkg_read_icon(ap, &icon)) {
+                r.content_type = "image/png";
+                r.body.assign((const char*)icon.data(), icon.size());
+                return r;
+            }
+        }
         if (!f) return json_error(404, "no_icon", id);
         std::string data;
         char buf[8192];
