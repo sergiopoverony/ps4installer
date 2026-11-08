@@ -1450,7 +1450,8 @@ static void draw_info_top(const Game& g, int x, int y, int W)
 // Полоска занятого места шириной w: серая основа, занято - синее, нужно для игры - оранжевое и толще, дальше свободно -
 // зеленоватое. Под ней подписи. Возвращает занятую высоту.
 
-static const int SPACE_INFO_H = 14 + 10 + 2 * (DESC_PX + 8);
+static const int SPACE_PX = 22;   // подписи «Нужно» / «Свободно»
+static const int SPACE_INFO_H = 14 + 10 + 2 * (SPACE_PX + 8);
 static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = false)
 {
     const int needH = 14, barH = 14;   // ровная полоска
@@ -1474,13 +1475,13 @@ static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = fal
         fill(x + usedW + needW, bt, w - usedW - needW, barH, C_BAR_FREE);
         fill(x + usedW, bt, needW, barH, C_BAR_NEED);
     }
-    FT_Set_Pixel_Sizes(g_font, 0, DESC_PX);
-    int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : g_cellW * DESC_PX / FONT_PX;
-    int ly = y + needH + 10 + DESC_PX;
+    FT_Set_Pixel_Sizes(g_font, 0, SPACE_PX);
+    int cell = FT_Load_Char(g_font, 'M', FT_LOAD_DEFAULT) == 0 ? (int)(g_font->glyph->advance.x >> 6) : g_cellW * SPACE_PX / FONT_PX;
+    int ly = y + needH + 10 + SPACE_PX;
     std::string a = trf("space.need", fmt_size(g_selNeed));
     std::string b = g_freeOk ? trf("space.free", fmt_size(g_freeBytes)) : tr("space.unknown");
     draw_text(a, center ? x + (w - count_cp(a) * cell) / 2 : x, ly, C_BAR_NEED, C_PANEL);
-    draw_text(b, center ? x + (w - count_cp(b) * cell) / 2 : x, ly + DESC_PX + 8, g_freeOk ? C_BAR_FREE : C_WARN, C_PANEL);
+    draw_text(b, center ? x + (w - count_cp(b) * cell) / 2 : x, ly + SPACE_PX + 8, g_freeOk ? C_BAR_FREE : C_WARN, C_PANEL);
     FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
     return SPACE_INFO_H;
 }
