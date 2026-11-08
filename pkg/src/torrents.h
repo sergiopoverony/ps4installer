@@ -36,9 +36,10 @@ std::string torrents_clean_hash(const std::string& h);
 // и всё дольше для фоновых проверок (background=true): 15 с, 30 с, 1 мин ... до 10 минут, пока связи нет. Появилась связь - счётчик сбрасывается.
 bool net_online_cached(int timeout_ms, bool background);
 
-// Живая проверка раздающих у трекера рутрекера (API по хэшу, обычный HTTP). true - получили числа. Сеть трогает только когда
+// Живая проверка раздающих: announce на трекер рутрекера (обычный HTTP, numwant=0, берём complete/incomplete); если не вышло - API по хэшу. true - получили числа. Сеть трогает только когда
 // net_online_cached(..., true) говорит «онлайн»; без интернета ничего не отправляет. raw - начало ответа для журнала.
 bool torrents_peer_stats(const std::string& hash, int& seeders, int& leechers, std::string* raw = nullptr);
+void torrents_configure_tracker(const std::string& host, int port);   // только для проверок
 extern const char* PEER_API_HOST;   // api.t-ru.org (проверить на консоли: если сервер не отвечает по HTTP, в карточке ничего не показывается)
 
 // Отвечает ли ps4torrent (запущен ли он сейчас).

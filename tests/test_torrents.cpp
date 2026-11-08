@@ -64,6 +64,15 @@ int main(int argc, char** argv)
     CHECK(st[L2].state == RS_NOSVC);
     CHECK(torrents_request(L1, "Game One", err) && torrents_poll(hs)[L1].state == RS_WAIT);   // ожидающие видны и без клиента
 
+    // раздающие: announce на подставной трекер (тот же порт), нужный хэш -> 12 / 3; ответ-ошибка -> нет данных
+    {
+        torrents_configure_tracker("127.0.0.1", port);
+        int s = -1, l = -1;
+        CHECK(torrents_peer_stats(L2, s, l) && s == 12 && l == 3);
+        CHECK(!torrents_peer_stats(L1, s, l));
+        CHECK(!torrents_peer_stats("abc", s, l));
+    }
+
     // имя файла magnet и запись на «флешку»
     CHECK(torrents_magnet_filename("Fallout 4: GOTY / ReMOD", "CUSA02557") == "Fallout_4_GOTY_ReMOD_CUSA02557_magnet.txt");
     CHECK(torrents_magnet_filename("\xd0\x98\xd0\xb3\xd1\x80\xd0\xb0", "") == "game_magnet.txt");

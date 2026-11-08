@@ -356,7 +356,13 @@ std::vector<std::string> installed_title_ids() {
 }
 
 // Файлы установленной игры: места, где они обычно лежат на джейлбрейкнутой консоли (не проверено на 13.02).
-static const char* APPMETA_DIRS[] = {"/user/appmeta/", "/system_data/priv/appmeta/"};
+static std::vector<std::string> appmeta_dirs() {   // у игр на EXT описание и иконка бывают и в /mnt/extN/user/appmeta
+    std::vector<std::string> v;
+    v.push_back("/user/appmeta/");
+    v.push_back("/system_data/priv/appmeta/");
+    for (int k = 0; k < 10; k++) v.push_back("/mnt/ext" + std::to_string(k) + "/user/appmeta/");
+    return v;
+}
 
 static std::string game_root(const InstalledGame& g) {
     std::vector<std::pair<std::string, std::string> > roots = app_roots();
@@ -372,17 +378,19 @@ std::vector<InstalledGame> installed_games() {
     std::vector<InstalledGame> out = scan_app_roots();
     for (size_t i = 0; i < out.size(); i++) {
         std::string t;
-        for (const char* d : APPMETA_DIRS) {
+        for (const std::string& d : appmeta_dirs()) {
             if (pkg_sfo_title_from_file(std::string(d) + out[i].title_id + "/param.sfo", &t)) break;
         }
         if (t.empty()) pkg_sfo_title_from_file(game_root(out[i]) + "/sce_sys/param.sfo", &t);
+        if (t.empty()) pkg_sfo_title_from_file(game_root(out[i]) + "/param.sfo", &t);
+        if (t.empty()) log_printf("installed: %s (%s) - название не найдено; корень %s", out[i].title_id.c_str(), out[i].loc.c_str(), game_root(out[i]).c_str());
         out[i].title = t;
     }
     return out;
 }
 
 std::string app_icon_path(const std::string& title_id) {
-    for (const char* d : APPMETA_DIRS) {
+    for (const std::string& d : appmeta_dirs()) {
         std::string p = std::string(d) + title_id + "/icon0.png";
         if (access(p.c_str(), R_OK) == 0) return p;
     }
