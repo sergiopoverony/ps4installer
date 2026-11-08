@@ -41,6 +41,9 @@ bool service_icon(const std::string& pkgPath, std::string& png);
 bool service_installed(std::vector<std::string>& ids);   // title_id установленных игр
 // Установленные игры с названиями (GET /installed_games): пары (title_id, название; название может быть пустым).
 bool service_installed_games(std::vector<std::pair<std::string, std::string> >& out);
+// То же, но с местом установки: loc = "HDD" / "EXT" (пусто, если служба старая и не сообщает).
+struct InstalledInfo { std::string id, title, loc; };
+bool service_installed_list(std::vector<InstalledInfo>& out);
 // Иконка установленной игры (GET /appicon). false, если её нет.
 bool service_app_icon(const std::string& titleId, std::string& png);
 // POST /launch: запуск установленной игры. В err причина отказа.

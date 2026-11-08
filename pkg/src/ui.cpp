@@ -586,8 +586,8 @@ static std::string lower_ascii(std::string s)
 // Вкладка «Установленные игры»: список берём у службы, названия - из param.sfo, а если их нет - из каталога.
 static void load_installed(ListState& L)
 {
-    std::vector<std::pair<std::string, std::string> > list;
-    if (!service_installed_games(list)) {
+    std::vector<InstalledInfo> list;
+    if (!service_installed_list(list)) {
         L.load = LS_ERROR;
         L.err = tr("err.no_service");
         L.games.clear();
@@ -595,10 +595,11 @@ static void load_installed(ListState& L)
     }
     L.games.clear();
     for (size_t i = 0; i < list.size(); i++) {
-        if (list[i].first == SELF_TITLE_ID) continue;   // сам магазин в списке не нужен
+        if (list[i].id == SELF_TITLE_ID) continue;   // сам магазин в списке не нужен
         Game g;
-        g.title_id = list[i].first;
-        g.title = list[i].second;
+        g.title_id = list[i].id;
+        g.title = list[i].title;
+        g.loc = list[i].loc;
         if (g.title.empty()) {
             const CatEntry* e = catalog_find(g.title_id, "");
             g.title = e && !e->name_en.empty() ? e->name_en : g.title_id;
@@ -1132,7 +1133,11 @@ static void draw_tile(int x, int y, const Game& g, bool selected, const CatImage
         else if (!g.installed && game_queued(g)) { m = tr("tile.queued"); sbg = C_WARN; sfg = C_BG; }
         const int bh = FONT_PX + 10, sy = y + IMG_H - bh;
         int szw = 0;
-        if (!g.console && !g.listOnly) {
+        if (g.console && !g.loc.empty()) {   // установленные: где стоит игра (HDD / EXT) - в том же углу, где у «Доступных» размер
+            szw = text_w(g.loc) + 12;
+            fill(x + TILE_W - szw, sy, szw, bh, C_BG);
+            draw_text(g.loc, x + TILE_W - szw + 6, y + IMG_H - 9, g.loc == "EXT" ? C_BAR_NEED : C_DIM, C_BG);
+        } else if (!g.console && !g.listOnly) {
             std::string sz = fmt_size(g.size);
             szw = text_w(sz) + 12;
             fill(x + TILE_W - szw, sy, szw, bh, C_BG);

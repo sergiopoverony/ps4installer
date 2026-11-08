@@ -17,6 +17,7 @@ std::vector<std::string> installed_title_ids();
 // На ПК: FAKE_INSTALLED="ID:Название,ID2".
 struct InstalledGame {
     std::string title_id, title;
+    std::string loc;   // где стоит: "HDD" (внутренний диск) или "EXT" (расширенное хранилище /mnt/ext*)
 };
 std::vector<InstalledGame> installed_games();
 // Путь к icon0.png установленной игры или пустая строка. На ПК: папка FAKE_APPMETA/<ID>/icon0.png.

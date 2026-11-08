@@ -171,7 +171,7 @@ Response route(const Request& rq) {
         std::vector<platform::InstalledGame> gs = platform::installed_games();
         r.body = "{\"ok\":true,\"games\":[";
         for (size_t i = 0; i < gs.size(); i++)
-            r.body += std::string(i ? "," : "") + "{\"id\":\"" + json_escape(gs[i].title_id) + "\",\"title\":\"" + json_escape(gs[i].title) + "\"}";
+            r.body += std::string(i ? "," : "") + "{\"id\":\"" + json_escape(gs[i].title_id) + "\",\"title\":\"" + json_escape(gs[i].title) + "\",\"loc\":\"" + json_escape(gs[i].loc) + "\"}";
         r.body += "]}";
         return r;
     }

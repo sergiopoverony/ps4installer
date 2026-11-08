@@ -133,7 +133,7 @@ bool service_installed(std::vector<std::string>& ids)
     return true;
 }
 
-bool service_installed_games(std::vector<std::pair<std::string, std::string> >& out)
+bool service_installed_list(std::vector<InstalledInfo>& out)
 {
     out.clear();
     HttpResult r = http_get(SERVICE_HOST, SERVICE_PORT, "/installed_games", 5000);
@@ -141,7 +141,20 @@ bool service_installed_games(std::vector<std::pair<std::string, std::string> >& 
     JsonValue j;
     if (!json_parse(r.body, j) || !j["ok"].asBool()) return false;
     const JsonValue& a = j["games"];
-    for (size_t i = 0; i < a.arr.size(); i++) out.push_back(std::make_pair(a.arr[i]["id"].asStr(), a.arr[i]["title"].asStr()));
+    for (size_t i = 0; i < a.arr.size(); i++) {
+        InstalledInfo g;
+        g.id = a.arr[i]["id"].asStr(); g.title = a.arr[i]["title"].asStr(); g.loc = a.arr[i]["loc"].asStr();
+        out.push_back(g);
+    }
+    return true;
+}
+
+bool service_installed_games(std::vector<std::pair<std::string, std::string> >& out)
+{
+    out.clear();
+    std::vector<InstalledInfo> l;
+    if (!service_installed_list(l)) return false;
+    for (size_t i = 0; i < l.size(); i++) out.push_back(std::make_pair(l[i].id, l[i].title));
     return true;
 }
 

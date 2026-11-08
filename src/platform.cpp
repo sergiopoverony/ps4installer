@@ -72,6 +72,8 @@ std::vector<InstalledGame> installed_games() {
             InstalledGame g;
             g.title_id = c == std::string::npos ? one : one.substr(0, c);
             if (c != std::string::npos) g.title = one.substr(c + 1);
+            const char* ex = getenv("FAKE_INSTALLED_EXT");   // для тестов: Title ID через запятую, стоящие на EXT
+            g.loc = (ex && (std::string(",") + ex + ",").find("," + g.title_id + ",") != std::string::npos) ? "EXT" : "HDD";
             out.push_back(g);
         }
         i = k + 1;
@@ -314,34 +316,67 @@ void notify_icon(const std::string& msg, const std::string& icon_uri) {
     sceKernelSendNotificationRequest(0, &req, sizeof(req), 0);
 }
 
+// Корни с играми: внутренний диск и расширенное хранилище (/mnt/ext0/user/app ...).
+static std::vector<std::pair<std::string, std::string> > app_roots() {   // {папка, метка}
+    std::vector<std::pair<std::string, std::string> > r;
+    r.push_back(std::make_pair(std::string("/user/app"), std::string("HDD")));
+    for (int i = 0; i < 10; i++) r.push_back(std::make_pair("/mnt/ext" + std::to_string(i) + "/user/app", std::string("EXT")));
+    return r;
+}
+
+static std::vector<InstalledGame> scan_app_roots() {
+    std::vector<InstalledGame> out;
+    std::vector<std::pair<std::string, std::string> > roots = app_roots();
+    for (size_t r = 0; r < roots.size(); r++) {
+        DIR* d = opendir(roots[r].first.c_str());
+        if (!d) continue;
+        while (struct dirent* e = readdir(d)) {
+            std::string n = e->d_name;
+            if (n.size() != 9 || !isalpha((unsigned char)n[0])) continue;
+            bool dup = false;
+            for (size_t k = 0; k < out.size(); k++) {
+                if (out[k].title_id == n) { dup = true; if (roots[r].second == "EXT") out[k].loc = "EXT"; }   // след на внутреннем диске и полная игра на EXT: считаем EXT
+            }
+            if (dup) continue;
+            InstalledGame g;
+            g.title_id = n;
+            g.loc = roots[r].second;
+            out.push_back(g);
+        }
+        closedir(d);
+    }
+    return out;
+}
+
 std::vector<std::string> installed_title_ids() {
     std::vector<std::string> out;
-    DIR* d = opendir("/user/app");
-    if (!d) return out;
-    while (struct dirent* e = readdir(d)) {
-        std::string n = e->d_name;
-        if (n.size() == 9 && isalpha((unsigned char)n[0])) out.push_back(n);
-    }
-    closedir(d);
+    std::vector<InstalledGame> gs = scan_app_roots();
+    for (size_t i = 0; i < gs.size(); i++) out.push_back(gs[i].title_id);
     return out;
 }
 
 // Файлы установленной игры: места, где они обычно лежат на джейлбрейкнутой консоли (не проверено на 13.02).
 static const char* APPMETA_DIRS[] = {"/user/appmeta/", "/system_data/priv/appmeta/"};
 
+static std::string game_root(const InstalledGame& g) {
+    std::vector<std::pair<std::string, std::string> > roots = app_roots();
+    for (size_t r = roots.size(); r-- > 0;) {   // EXT проверяем первым
+        if (roots[r].second != g.loc) continue;
+        std::string p = roots[r].first + "/" + g.title_id;
+        if (access(p.c_str(), F_OK) == 0) return p;
+    }
+    return "/user/app/" + g.title_id;
+}
+
 std::vector<InstalledGame> installed_games() {
-    std::vector<InstalledGame> out;
-    std::vector<std::string> ids = installed_title_ids();
-    for (size_t i = 0; i < ids.size(); i++) {
-        InstalledGame g;
-        g.title_id = ids[i];
+    std::vector<InstalledGame> out = scan_app_roots();
+    for (size_t i = 0; i < out.size(); i++) {
         std::string t;
         for (const char* d : APPMETA_DIRS) {
-            if (pkg_sfo_title_from_file(std::string(d) + ids[i] + "/param.sfo", &t)) break;
+            if (pkg_sfo_title_from_file(std::string(d) + out[i].title_id + "/param.sfo", &t)) break;
         }
-        if (t.empty()) pkg_sfo_title_from_file("/user/app/" + ids[i] + "/sce_sys/param.sfo", &t);
-        g.title = t;
-        out.push_back(g);
+        if (t.empty()) pkg_sfo_title_from_file(game_root(out[i]) + "/sce_sys/param.sfo", &t);
+        out[i].title = t;
     }
     return out;
 }
@@ -351,8 +386,12 @@ std::string app_icon_path(const std::string& title_id) {
         std::string p = std::string(d) + title_id + "/icon0.png";
         if (access(p.c_str(), R_OK) == 0) return p;
     }
-    std::string p = "/user/app/" + title_id + "/sce_sys/icon0.png";
-    return access(p.c_str(), R_OK) == 0 ? p : "";
+    std::vector<std::pair<std::string, std::string> > roots = app_roots();
+    for (size_t r = 0; r < roots.size(); r++) {
+        std::string p = roots[r].first + "/" + title_id + "/sce_sys/icon0.png";
+        if (access(p.c_str(), R_OK) == 0) return p;
+    }
+    return "";
 }
 
 struct LaunchAppParam {

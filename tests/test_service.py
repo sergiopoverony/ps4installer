@@ -378,10 +378,10 @@ class ServiceTests(unittest.TestCase):
         open(meta + "/CUSA00001/icon0.png", "wb").write(png)
         log = meta + "/launch.log"
         self.srv = Server(env={"FAKE_INSTALLED": "CUSA00001:Game One,CUSA00002", "FAKE_APPMETA": meta,
-                               "FAKE_LAUNCH_LOG": log})
+                               "FAKE_LAUNCH_LOG": log, "FAKE_INSTALLED_EXT": "CUSA00002"})
         code, j = self.srv.get("/installed_games")
         self.assertEqual(code, 200)
-        self.assertEqual(j["games"], [{"id": "CUSA00001", "title": "Game One"}, {"id": "CUSA00002", "title": ""}])
+        self.assertEqual(j["games"], [{"id": "CUSA00001", "title": "Game One", "loc": "HDD"}, {"id": "CUSA00002", "title": "", "loc": "EXT"}])
         self.assertEqual(self.srv.get("/installed")[1]["title_ids"], ["CUSA00001", "CUSA00002"])
         with urllib.request.urlopen("http://127.0.0.1:%d/appicon?id=CUSA00001" % self.srv.port) as r:
             self.assertEqual(r.read(), png)
