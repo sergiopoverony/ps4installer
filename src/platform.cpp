@@ -1,4 +1,5 @@
 #include <dirent.h>
+#include <sys/stat.h>
 #include <cctype>
 #include "platform.h"
 
@@ -375,6 +376,51 @@ static std::string game_root(const InstalledGame& g) {
     return "/user/app/" + g.title_id;
 }
 
+// Ищет файл name в папке dir и глубже (до depth уровней). Пусто, если нет.
+static std::string find_file(const std::string& dir, const char* name, int depth) {
+    std::string direct = dir + "/" + name;
+    if (access(direct.c_str(), R_OK) == 0) return direct;
+    if (depth <= 0) return "";
+    DIR* d = opendir(dir.c_str());
+    if (!d) return "";
+    std::vector<std::string> subs;
+    while (struct dirent* e = readdir(d)) {
+        std::string n = e->d_name;
+        if (n == "." || n == "..") continue;
+        struct stat st;
+        if (stat((dir + "/" + n).c_str(), &st) == 0 && S_ISDIR(st.st_mode)) subs.push_back(n);
+    }
+    closedir(d);
+    for (size_t i = 0; i < subs.size(); i++) {
+        std::string r = find_file(dir + "/" + subs[i], name, depth - 1);
+        if (!r.empty()) return r;
+    }
+    return "";
+}
+
+// Все места, где у игры могут лежать param.sfo и icon0.png: корень игры и папки appmeta (в том числе на EXT).
+static std::vector<std::string> meta_places(const InstalledGame& g) {
+    std::vector<std::string> v;
+    v.push_back(game_root(g));
+    std::vector<std::string> a = appmeta_dirs();
+    for (size_t i = 0; i < a.size(); i++) v.push_back(a[i] + g.title_id);
+    return v;
+}
+
+static std::string list_dir(const std::string& dir) {   // для журнала: что лежит в папке
+    DIR* d = opendir(dir.c_str());
+    if (!d) return "(нет папки)";
+    std::string o;
+    int n = 0;
+    while (struct dirent* e = readdir(d)) {
+        std::string nm = e->d_name;
+        if (nm == "." || nm == "..") continue;
+        if (n++ < 20) o += nm + " ";
+    }
+    closedir(d);
+    return n ? o : "(пусто)";
+}
+
 std::vector<InstalledGame> installed_games() {
     std::vector<InstalledGame> out = scan_app_roots();
     for (size_t i = 0; i < out.size(); i++) {
@@ -383,7 +429,19 @@ std::vector<InstalledGame> installed_games() {
             if (pkg_sfo_title_from_file(std::string(d) + out[i].title_id + "/param.sfo", &t)) break;
         }
         if (t.empty()) pkg_sfo_title_from_file(game_root(out[i]) + "/sce_sys/param.sfo", &t);
-        if (t.empty()) pkg_sfo_title_from_file(game_root(out[i]) + "/param.sfo", &t);
+        if (t.empty()) {
+            std::vector<std::string> pl = meta_places(out[i]);
+            for (size_t k = 0; k < pl.size() && t.empty(); k++) {
+                std::string f = find_file(pl[k], "param.sfo", 3);
+                if (!f.empty()) pkg_sfo_title_from_file(f, &t);
+            }
+        }
+        if (t.empty()) {
+            std::vector<std::string> pl = meta_places(out[i]);
+            for (size_t k = 0; k < pl.size(); k++) {
+                if (access(pl[k].c_str(), F_OK) == 0) log_printf("installed: %s: %s -> %s", out[i].title_id.c_str(), pl[k].c_str(), list_dir(pl[k]).c_str());
+            }
+        }
         if (t.empty()) log_printf("installed: %s (%s) - название не найдено; корень %s", out[i].title_id.c_str(), out[i].loc.c_str(), game_root(out[i]).c_str());
         out[i].title = t;
     }
@@ -395,10 +453,14 @@ std::string app_icon_path(const std::string& title_id) {
         std::string p = std::string(d) + title_id + "/icon0.png";
         if (access(p.c_str(), R_OK) == 0) return p;
     }
-    std::vector<std::pair<std::string, std::string> > roots = app_roots();
-    for (size_t r = 0; r < roots.size(); r++) {
-        std::string p = roots[r].first + "/" + title_id + "/sce_sys/icon0.png";
-        if (access(p.c_str(), R_OK) == 0) return p;
+    InstalledGame g;
+    g.title_id = title_id;
+    std::vector<InstalledGame> all = scan_app_roots();
+    for (size_t i = 0; i < all.size(); i++) if (all[i].title_id == title_id) g = all[i];
+    std::vector<std::string> pl = meta_places(g);
+    for (size_t k = 0; k < pl.size(); k++) {
+        std::string f = find_file(pl[k], "icon0.png", 3);
+        if (!f.empty()) return f;
     }
     return "";
 }
