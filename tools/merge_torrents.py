@@ -109,6 +109,7 @@ def read_table(path):
         return [r for r in csv.DictReader(f, delimiter=";") if hash_of(r)]
 
 
+CACHE_ONLY = False   # --cache-only: картинки только из кэша, в интернет не ходим
 CACHE = None   # папка с уже скачанными картинками: при повторном запуске их не качаем заново
 
 
@@ -127,6 +128,8 @@ def download(url, tries=2, delay=0.2):
             return cf.read_bytes()
         if cf.with_suffix(".gone").exists():
             raise Permanent("картинки уже нет (404)")
+    if CACHE_ONLY:
+        raise RuntimeError("нет в кэше")
     try:
         data = _download(url, tries, delay)
     except Permanent:
@@ -164,7 +167,7 @@ def prefetch(rows, log, workers=16):
             urls.append(cu)
         urls.extend((r.get("Скриншоты (URL)") or "").split()[:FC.MAX_SHOTS])
     urls = [u for u in dict.fromkeys(urls) if not (_cache_file(u).exists() or _cache_file(u).with_suffix(".gone").exists())]
-    if not urls:
+    if not urls or CACHE_ONLY:
         return
     log("скачиваю картинки параллельно: %d шт., потоков %d" % (len(urls), workers))
     from concurrent.futures import ThreadPoolExecutor
@@ -356,11 +359,14 @@ def merge(data_dir, table_path, media=True, log=print, cache_dir=None):
 
 
 def main():
+    global CACHE_ONLY
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("data_dir", help="папка с catalog.json и catalog.pak")
     ap.add_argument("table", help="ps4_games.csv (tools/rutracker_table.py)")
+    ap.add_argument("--cache-only", action="store_true", help="картинки только из кэша, ничего не качать")
     ap.add_argument("--no-media", action="store_true", help="не качать обложки и скриншоты")
     a = ap.parse_args()
+    CACHE_ONLY = a.cache_only
     st = merge(a.data_dir, a.table, media=not a.no_media, log=lambda s: print(s, flush=True))
     print("Игр магазина в каталоге:", st["catalog"])
     print("  из них с раздачей:", st["with_torrent"], "(по коду %d, по названию %d)" % (st["by_code"], st["by_name"]))
