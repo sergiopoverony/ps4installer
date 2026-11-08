@@ -4,6 +4,9 @@
 #include <string>
 #include <vector>
 #include <sys/stat.h>
+#include <string.h>
+#include <arpa/inet.h>
+#include "net.h"
 #include "torrents.h"
 
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); return 1; } } while (0)
@@ -63,6 +66,14 @@ int main(int argc, char** argv)
     st = torrents_poll(hs);
     CHECK(st[L2].state == RS_NOSVC);
     CHECK(torrents_request(L1, "Game One", err) && torrents_poll(hs)[L1].state == RS_WAIT);   // ожидающие видны и без клиента
+
+    // свой DNS-запрос (запасной путь, когда getaddrinfo не работает): подставной сервер отвечает 10.1.2.3
+    if (argc > 3) {
+        struct in_addr ip;
+        CHECK(net_resolve_dns("bt.t-ru.org", "127.0.0.1", atoi(argv[3]), &ip, 2000));
+        CHECK(strcmp(inet_ntoa(ip), "10.1.2.3") == 0);
+        CHECK(!net_resolve_dns("bt.t-ru.org", "127.0.0.1", 1, &ip, 300));   // сервера нет: ответа нет
+    }
 
     // раздающие: announce на подставной трекер (тот же порт), нужный хэш -> 12 / 3; ответ-ошибка -> нет данных
     {

@@ -16,6 +16,75 @@
 
 bool net_init() { return true; }   // сеть инициализирует библиотека SDK при первом обращении
 
+static void fill_addr(struct sockaddr_in& a, struct in_addr ip, int port) {
+    memset(&a, 0, sizeof(a));
+#ifndef __linux__
+    a.sin_len = sizeof(a);
+#endif
+    a.sin_family = AF_INET;
+    a.sin_port = htons((unsigned short)port);
+    a.sin_addr = ip;
+}
+
+// Свой запрос A-записи по UDP: системный getaddrinfo в приложении иногда отвечает ошибкой (-11), хотя интернет есть.
+bool net_resolve_dns(const char* host, const char* server, int port, struct in_addr* out, int timeout_ms) {
+    unsigned char q[300];
+    size_t n = 0;
+    q[n++] = 0x5a; q[n++] = 0x17;   // id
+    q[n++] = 0x01; q[n++] = 0x00;   // рекурсия желательна
+    q[n++] = 0; q[n++] = 1; q[n++] = 0; q[n++] = 0; q[n++] = 0; q[n++] = 0; q[n++] = 0; q[n++] = 0;
+    const char* p = host;
+    while (*p) {
+        const char* dot = strchr(p, '.');
+        size_t len = dot ? (size_t)(dot - p) : strlen(p);
+        if (len == 0 || len > 63 || n + len + 6 > sizeof(q)) return false;
+        q[n++] = (unsigned char)len;
+        memcpy(q + n, p, len); n += len;
+        p += len + (dot ? 1 : 0);
+        if (!dot) break;
+    }
+    q[n++] = 0;
+    q[n++] = 0; q[n++] = 1; q[n++] = 0; q[n++] = 1;   // тип A, класс IN
+
+    int s = socket(AF_INET, SOCK_DGRAM, 0);
+    if (s < 0) return false;
+    struct sockaddr_in a;
+    struct in_addr sip;
+    sip.s_addr = inet_addr(server);
+    fill_addr(a, sip, port);
+    bool ok = false;
+    if (sendto(s, q, n, 0, (struct sockaddr*)&a, sizeof(a)) == (ssize_t)n) {
+        fd_set rf;
+        FD_ZERO(&rf);
+        FD_SET(s, &rf);
+        struct timeval tv;
+        tv.tv_sec = timeout_ms / 1000;
+        tv.tv_usec = (timeout_ms % 1000) * 1000;
+        if (select(s + 1, &rf, NULL, NULL, &tv) > 0) {
+            unsigned char r[512];
+            ssize_t m = recv(s, r, sizeof(r), 0);
+            if (m > 12 && r[0] == q[0] && r[1] == q[1] && (r[3] & 0x0f) == 0) {
+                int an = (r[6] << 8) | r[7];
+                size_t i = 12;
+                while (i < (size_t)m && r[i] != 0) i += (r[i] & 0xc0) == 0xc0 ? 2 : (size_t)r[i] + 1;   // имя вопроса
+                if (i < (size_t)m && r[i] == 0) i += 1;
+                i += 4;
+                for (int k = 0; k < an && i + 12 <= (size_t)m; k++) {
+                    while (i < (size_t)m && r[i] != 0 && (r[i] & 0xc0) != 0xc0) i += (size_t)r[i] + 1;
+                    i += (i < (size_t)m && (r[i] & 0xc0) == 0xc0) ? 2 : 1;
+                    if (i + 10 > (size_t)m) break;
+                    int type = (r[i] << 8) | r[i + 1], rdlen = (r[i + 8] << 8) | r[i + 9];
+                    i += 10;
+                    if (type == 1 && rdlen == 4 && i + 4 <= (size_t)m) { memcpy(&out->s_addr, r + i, 4); ok = true; break; }
+                    i += (size_t)rdlen;
+                }
+            }
+        }
+    }
+    close(s);
+    return ok;
+}
+
 bool net_resolve(const char* host, struct in_addr* out) {
     in_addr_t lit = inet_addr(host);
     if (lit != (in_addr_t)-1) { out->s_addr = lit; return true; }
@@ -25,20 +94,21 @@ bool net_resolve(const char* host, struct in_addr* out) {
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
     int rc = getaddrinfo(host, NULL, &hints, &res);
-    if (rc != 0 || !res) { logf_("resolve %s failed rc=%d", host, rc); return false; }
-    *out = ((struct sockaddr_in*)res->ai_addr)->sin_addr;
-    freeaddrinfo(res);
-    return true;
-}
-
-static void fill_addr(struct sockaddr_in& a, struct in_addr ip, int port) {
-    memset(&a, 0, sizeof(a));
-#ifndef __linux__
-    a.sin_len = sizeof(a);
-#endif
-    a.sin_family = AF_INET;
-    a.sin_port = htons((unsigned short)port);
-    a.sin_addr = ip;
+    if (rc == 0 && res) {
+        *out = ((struct sockaddr_in*)res->ai_addr)->sin_addr;
+        freeaddrinfo(res);
+        return true;
+    }
+    logf_("resolve %s failed rc=%d, пробуем DNS напрямую", host, rc);
+    static const char* servers[] = { "8.8.8.8", "1.1.1.1", "77.88.8.8" };
+    for (size_t i = 0; i < sizeof(servers) / sizeof(servers[0]); i++) {
+        if (net_resolve_dns(host, servers[i], 53, out, 1500)) {
+            logf_("resolve %s: DNS %s -> %s", host, servers[i], inet_ntoa(*out));
+            return true;
+        }
+    }
+    logf_("resolve %s: DNS напрямую тоже не ответил", host);
+    return false;
 }
 
 int net_connect(const char* host, int port, int timeout_ms) {
