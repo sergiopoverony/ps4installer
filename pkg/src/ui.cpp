@@ -1495,8 +1495,8 @@ static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = fal
     std::string b = g_freeOk ? trf("space.free", fmt_size(g_freeBytes)) : tr("space.unknown");
     draw_text(a, center ? x + (w - count_cp(a) * cell) / 2 : x, ly, C_BAR_NEED, C_PANEL);
     draw_text(b, center ? x + (w - count_cp(b) * cell) / 2 : x, ly + SPACE_PX + 8, g_freeOk ? C_BAR_FREE : C_WARN, C_PANEL);
-    int ey = ly + 2 * (SPACE_PX + 8);   // дальше - год выпуска (из каталога) и раздающие (только «Избранное» и только с интернетом)
-    if (extra && g_selYear > 0) { draw_text(trf("card.year", std::to_string(g_selYear)), x, ey, C_DIM, C_PANEL); ey += SPACE_PX + 8; }
+    int ey = ly + 2 * (SPACE_PX + 8) - 4;   // дальше - год выпуска (из каталога) и раздающие (только «Избранное» и только с интернетом)
+    if (extra && g_selYear > 0) { draw_text(trf("card.year", std::to_string(g_selYear)), x, ey, C_DIM, C_PANEL); ey += SPACE_PX + 4; }
     if (extra && g_cardReason == CARD_FAV) {
         if (g_peerShow) {
             bool none = g_peerSeeds <= 0;
@@ -1511,7 +1511,7 @@ static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = fal
 static void draw_confirm()
 {
     const int W = 1500;   // 30 + обложка 350 + 30 + 4 скриншота с промежутками (4*254+3*14) + 30 = 1478
-    const int H = g_cardReason == CARD_LAUNCH ? 520 : (g_cardReason == CARD_REQUEST || g_cardReason == CARD_FAV) ? 650 : 590;
+    const int H = g_cardReason == CARD_LAUNCH ? 520 : 590;
     // по центру между шапкой и нижней строкой подсказок
     int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + (FRAME_HEIGHT - 100 - HEAD_H - H) / 2;
     draw_panel(x, y, W, H);
