@@ -38,7 +38,7 @@ STOP = {"the", "edition", "editions", "definitive", "deluxe", "complete", "remas
 # слова, после которых это уже другая игра, а не издание той же (Doom Eternal, ... VR)
 SEQUEL = {"eternal", "vr", "origins", "odyssey", "legacy", "rising", "unleashed", "reborn", "reloaded", "returns", "redux", "arena",
           "tactics", "online", "world", "racing", "war", "ii", "iii", "iv", "ex", "zero", "next", "rush", "remix", "legends", "heroes"}
-FIELDS = ("th", "tu", "tv", "td", "tf", "tb", "ts")
+FIELDS = ("th", "tu", "tv", "td", "tf", "tb", "ts", "ty")   # ty - год выпуска (0 - не указан)
 
 
 def tokens(s):
@@ -91,10 +91,17 @@ def rank(r):
     return (yes(r["Рус. интерфейс"]), yes(r["Рус. озвучка"]), r["Дата"])
 
 
+def year_of(r):
+    m = re.search(r"\b((?:19|20)\d\d)\b", r.get("Год выпуска") or "")
+    if not m:   # старая таблица без этой колонки: ищем в сохранённом начале описания
+        m = re.search(r"(?:Год|Дата)\s+выпуска[^\n]{0,40}?((?:19|20)\d\d)", r.get("Описание (500 симв.)") or "", re.I)
+    return int(m.group(1)) if m else 0
+
+
 def fields_of(r):
     return {"th": hash_of(r), "tu": yes(r["Рус. интерфейс"]), "tv": yes(r["Рус. озвучка"]),
             "td": yes(r["DLC"]) if (r["DLC"] or "").strip() == "Да" else 0, "tf": yes(r["Fix"]), "tb": yes(r["Backport"]),
-            "ts": int(num(r["Размер, ГБ"]) * 1024)}
+            "ts": int(num(r["Размер, ГБ"]) * 1024), "ty": year_of(r)}
 
 
 def read_table(path):

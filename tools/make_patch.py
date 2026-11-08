@@ -21,7 +21,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import merge_torrents as M  # noqa: E402
 
-TF = ("th", "tu", "tv", "td", "tf", "tb", "ts")   # поля раздачи
+TF = ("th", "tu", "tv", "td", "tf", "tb", "ts", "ty")   # поля раздачи
 REFS = ("c", "d")                                  # одиночные ссылки в pak; "s" - список ссылок
 
 

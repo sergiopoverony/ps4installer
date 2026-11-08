@@ -687,6 +687,7 @@ static void load_catalog_list(ListState& L)
         g.title_id = e->title_id;
         g.hash = e->hash;
         g.size = (uint64_t)(e->size_mb > 0 ? e->size_mb : 0) * 1048576ULL;
+        g.year = e->year;
         g.rus = (e->ru || e->voice) ? 1 : 0;
         g.patches = e->fix ? 1 : 0;
         g.dlcs = e->dlc ? 1 : 0;
@@ -1457,7 +1458,14 @@ static void draw_info_top(const Game& g, int x, int y, int W)
 
 static const int SPACE_PX = 22;   // подписи «Нужно» / «Свободно»
 static const int SPACE_INFO_H = 14 + 10 + 2 * (SPACE_PX + 8);
-static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = false)
+// Живая проверка раздающих (только «Избранное», только если есть интернет): состояние для открытой карточки.
+struct PeerJob { volatile int state; std::string hash; int seeds, leech; bool ok; };
+static PeerJob g_peerJob = { 0, std::string(), 0, 0, false };
+static int g_peerSeeds = 0, g_peerLeech = 0;
+static bool g_peerShow = false;      // есть что показывать (без интернета или без ответа - ничего не показываем)
+static bool g_peerWait = false;      // проверка идёт
+static int g_selYear = 0;            // год выпуска открытой карточки (0 - неизвестен)
+static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = false, bool extra = false)
 {
     const int needH = 14, barH = 14;   // ровная полоска
     int bt = y + (needH - barH) / 2;
@@ -1487,6 +1495,15 @@ static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = fal
     std::string b = g_freeOk ? trf("space.free", fmt_size(g_freeBytes)) : tr("space.unknown");
     draw_text(a, center ? x + (w - count_cp(a) * cell) / 2 : x, ly, C_BAR_NEED, C_PANEL);
     draw_text(b, center ? x + (w - count_cp(b) * cell) / 2 : x, ly + SPACE_PX + 8, g_freeOk ? C_BAR_FREE : C_WARN, C_PANEL);
+    int ey = ly + 2 * (SPACE_PX + 8);   // дальше - год выпуска (из каталога) и раздающие (только «Избранное» и только с интернетом)
+    if (extra && g_selYear > 0) { draw_text(trf("card.year", std::to_string(g_selYear)), x, ey, C_DIM, C_PANEL); ey += SPACE_PX + 8; }
+    if (extra && g_cardReason == CARD_FAV) {
+        if (g_peerShow) {
+            bool none = g_peerSeeds <= 0;
+            std::string t = none ? tr("card.noseeds") : trf("card.seeds", std::to_string(g_peerSeeds), std::to_string(g_peerLeech));
+            draw_text(t, x, ey, none ? C_WARN : C_BAR_FREE, C_PANEL);
+        } else if (g_peerWait) draw_text(tr("card.seeds_wait"), x, ey, C_DIM, C_PANEL);
+    }
     FT_Set_Pixel_Sizes(g_font, 0, FONT_PX);
     return SPACE_INFO_H;
 }
@@ -1494,7 +1511,7 @@ static int draw_space_info(int x, int y, int w, bool center, bool freeOnly = fal
 static void draw_confirm()
 {
     const int W = 1500;   // 30 + обложка 350 + 30 + 4 скриншота с промежутками (4*254+3*14) + 30 = 1478
-    const int H = g_cardReason == CARD_LAUNCH ? 520 : 590;
+    const int H = g_cardReason == CARD_LAUNCH ? 520 : (g_cardReason == CARD_REQUEST || g_cardReason == CARD_FAV) ? 650 : 590;
     // по центру между шапкой и нижней строкой подсказок
     int x = (FRAME_WIDTH - W) / 2, y = HEAD_H + (FRAME_HEIGHT - 100 - HEAD_H - H) / 2;
     draw_panel(x, y, W, H);
@@ -1512,7 +1529,7 @@ static void draw_confirm()
     if (g_cardReason == CARD_REQUEST || g_cardReason == CARD_FAV) {
         // Под обложкой - размер игры и место (как в «Доступных»); справа - вопрос или причина, внизу - кнопки.
         int sx = x + 30, sy = y + 30 + COVER_H + 24;
-        draw_space_info(sx, sy, COVER_W, false, true);
+        draw_space_info(sx, sy, COVER_W, false, true, true);
         int bx = x + 30 + COVER_W + 30, bw = W - (bx - x) - 30, by = sy - 10;
         const int PH = 124;                   // плашка с вопросом: цвет по смыслу, текст по центру, шрифт как у названия игры
         std::string h, l1, l2;
@@ -2079,6 +2096,29 @@ static void* net_thread(void*)
     return nullptr;
 }
 
+static void* peer_thread(void*)
+{
+    int s = 0, l = 0;
+    std::string raw;
+    bool ok = torrents_peer_stats(g_peerJob.hash, s, l, &raw);
+    logf_("ui: раздающие %s: %s (%d/%d) ответ: %s", g_peerJob.hash.c_str(), ok ? "есть" : "нет данных", s, l, raw.c_str());
+    g_peerJob.ok = ok; g_peerJob.seeds = s; g_peerJob.leech = l;
+    __sync_synchronize();
+    g_peerJob.state = 2;
+    return nullptr;
+}
+
+static void peer_kick(const std::string& hash)
+{
+    if (hash.size() != 40 || g_peerJob.state != 0) return;
+    g_peerJob.hash = hash;
+    g_peerJob.state = 1;
+    g_peerWait = true;
+    pthread_t t;
+    if (pthread_create(&t, nullptr, peer_thread, nullptr) != 0) { g_peerJob.state = 0; g_peerWait = false; return; }
+    pthread_detach(t);
+}
+
 static void fav_case_compute()
 {
     g_favUsb.clear();
@@ -2106,6 +2146,7 @@ static void fav_case_finish()
     g_favUsb = g_netJob.usb;
     g_netJob.state = 0;
     if (!online) { g_favCase = FC_USB; return; }
+    peer_kick(g_sel.hash);   // интернет есть: спрашиваем раздающих в фоне
     if (!installed) { g_favCase = FC_NO_CLIENT; return; }
     if (!running) { g_favCase = FC_NOT_RUNNING; return; }
     g_favCase = FC_DOWNLOAD;
@@ -2274,6 +2315,7 @@ void ui_pump()
             if (g_mode == MODE_GRID && g_tab == TAB_CATALOG && !g_stripFocus && (pressed & ORBIS_PAD_BUTTON_CROSS) && !g_games.empty()) {
                 g_sel = g_games[(size_t)g_cursor];
                 g_cardReason = CARD_REQUEST;
+                g_selYear = g_sel.year;
                 g_confirmErr.clear();
                 g_confirmOk = false;
                 card_space();
@@ -2338,6 +2380,15 @@ void ui_pump()
         g_redraw = 2;
     }
 
+    if (g_peerJob.state == 2) {   // ответ про раздающих: показываем только для той раздачи, чья карточка открыта
+        __sync_synchronize();
+        g_peerWait = false;
+        if (g_mode == MODE_CONFIRM && g_cardReason == CARD_FAV && g_peerJob.hash == g_sel.hash && g_peerJob.ok) {
+            g_peerShow = true; g_peerSeeds = g_peerJob.seeds; g_peerLeech = g_peerJob.leech;
+        }
+        g_peerJob.state = 0;
+        g_redraw = 2;
+    }
     if (g_mode == MODE_CONFIRM && g_cardReason == CARD_FAV && g_favCase == FC_CHECK && g_netJob.state == 2) {
         fav_case_finish();
         g_confirmGuard = now + 500000;   // кнопки после появления вопроса - с задержкой, чтобы случайный повтор не сработал
@@ -2380,6 +2431,9 @@ void ui_pump()
             if (pressed & ORBIS_PAD_BUTTON_CROSS) {   // окно игры из избранного: качать / сохранить ссылку на USB
                 g_sel = g_games[(size_t)g_cursor];
                 g_cardReason = CARD_FAV;
+                g_selYear = g_sel.year;
+                if (g_selYear <= 0) { const CatEntry* ce = catalog_find(g_sel.title_id, g_sel.title); if (ce) g_selYear = ce->year; }
+                g_peerShow = false; g_peerWait = false;   // раздающих покажем, только если подтвердится интернет
                 g_confirmErr.clear();
                 g_confirmOk = false;
                 g_favDone = false;

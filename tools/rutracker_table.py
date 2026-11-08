@@ -26,7 +26,7 @@ BAD_CHARS = re.compile(rb"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 FORUM_RE = re.compile(rb'<forum id="(\d+)">([^<]*)</forum>')
 IMG_RE = re.compile(r"\[img[^\]]*\]\s*(https?://[^\s\[\]]+)\s*\[/img\]", re.I)
 HEADER = ["Название", "Код диска", "Описание (500 симв.)", "DLC", "Fix", "Backport", "Рус. интерфейс", "Рус. озвучка",
-          "Размер, ГБ", "Дата", "Страница раздачи", "Magnet", "Обложка (URL)", "Скриншоты (URL)"]
+          "Размер, ГБ", "Дата", "Страница раздачи", "Magnet", "Обложка (URL)", "Скриншоты (URL)", "Год выпуска"]
 
 
 def strip_bb(s):
@@ -53,6 +53,12 @@ def get_description(content):
 
 def field(content, label):
     m = re.search(label + r"([^\n]*)", content)
+    return m.group(1) if m else ""
+
+
+def get_year(content):
+    """Год выпуска игры из описания раздачи («Год выпуска: 2019», «Дата выпуска: 12.03.2019»). Пусто, если не указан."""
+    m = re.search(r"(?:Год|Дата)\s+выпуска[^\n]{0,40}?((?:19|20)\d\d)", content, re.I)
     return m.group(1) if m else ""
 
 
@@ -96,7 +102,7 @@ def make_row(elem):
     magnet = "magnet:?xt=urn:btih:%s&tr=%s" % (thash, TRACKER) if thash else ""
     return [clean_name(title), get_code(content, files_text), get_description(content), dlc, fix, backport,
             "Да" if rus_ui else "", "Да" if rus_voice else "", str(size_gb).replace(".", ","), elem.get("registred_at", ""),
-            "https://rutracker.org/forum/viewtopic.php?t=%s" % tid, magnet, cover, " ".join(shots)]
+            "https://rutracker.org/forum/viewtopic.php?t=%s" % tid, magnet, cover, " ".join(shots), get_year(content)]
 
 
 def scan(lines, forum_ids=FORUM_IDS, progress=None):

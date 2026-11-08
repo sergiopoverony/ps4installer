@@ -158,5 +158,13 @@ class MergeTest(unittest.TestCase):
         self.assertTrue(sum(1 for r in rows if r[12].startswith("http")) >= 30)
 
 
+class TestYear(unittest.TestCase):
+    def test_year_of(self):
+        self.assertEqual(M.year_of({"Год выпуска": "2019"}), 2019)
+        self.assertEqual(M.year_of({"Описание (500 симв.)": "Жанр: RPG\nГод выпуска: 2017\nЯзык"}), 2017)
+        self.assertEqual(M.year_of({"Описание (500 симв.)": "Дата выпуска: 12.03.2015"}), 2015)
+        self.assertEqual(M.year_of({"Описание (500 симв.)": "без года"}), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

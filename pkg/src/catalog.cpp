@@ -77,6 +77,7 @@ static CatEntry entry_of(const JsonValue& g, int pak)
     e.fix = (int)g["tf"].asInt();
     e.backport = (int)g["tb"].asInt();
     e.size_mb = (int)g["ts"].asInt();
+    e.year = (int)g["ty"].asInt();
     return e;
 }
 
@@ -102,6 +103,7 @@ static void merge_entry(const JsonValue& g, int pak, CatEntry& e)
     if (has_key(g, "tf")) e.fix = (int)g["tf"].asInt();
     if (has_key(g, "tb")) e.backport = (int)g["tb"].asInt();
     if (has_key(g, "ts")) e.size_mb = (int)g["ts"].asInt();
+    if (has_key(g, "ty")) e.year = (int)g["ty"].asInt();
 }
 
 static std::string patch_name(const std::string& dir, int n, const char* ext)

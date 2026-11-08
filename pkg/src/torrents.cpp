@@ -177,3 +177,25 @@ bool net_online_cached(int timeout_ms, bool background)
     if (ok) g_netFails = 0; else if (g_netFails < 10) g_netFails++;
     return ok;
 }
+
+const char* PEER_API_HOST = "api.t-ru.org";
+
+bool torrents_peer_stats(const std::string& hash, int& seeders, int& leechers, std::string* raw)
+{
+    seeders = leechers = 0;
+    if (hash.size() != 40) return false;
+    if (!net_online_cached(800, true)) return false;   // нет интернета - запросов нет
+    HttpResult r = http_get(PEER_API_HOST, 80, "/v1/get_peer_stats?by=hash&val=" + hash, 4000);
+    if (raw) *raw = r.body.substr(0, 200);
+    if (!r.connected || r.status != 200) return false;
+    JsonValue j;
+    if (!json_parse(r.body, j)) return false;
+    const JsonValue& res = j["result"];   // {"<хэш>": [раздающих, качающих, когда последний раздающий был]}
+    if (res.type != JsonValue::OBJ || res.obj.empty()) return false;
+    const JsonValue& a = res.obj[0].second;
+    if (a.type != JsonValue::ARR || a.arr.size() < 2) return false;
+    seeders = (int)a.arr[0].asInt();
+    leechers = (int)a.arr[1].asInt();
+    return true;
+}
+

@@ -107,3 +107,7 @@ hint.fav_add={X} - в избранное      {O} - закрыть
 fav.checking=Проверка...
 fav.start_client=Запустите PS4Torrent Client
 fav.add_q=Добавить игру в избранное?
+card.year=Год выпуска: {1}
+card.seeds=Раздают: {1}, качают: {2}
+card.noseeds=Раздающих нет
+card.seeds_wait=Проверяем раздающих...

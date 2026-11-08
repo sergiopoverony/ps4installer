@@ -16,6 +16,7 @@ struct CatEntry {
     std::string hash;
     int ru = 0, voice = 0, dlc = 0, fix = 0, backport = 0;   // русский интерфейс, русская озвучка, DLC, исправление, Backport
     int size_mb = 0;
+    int year = 0;    // год выпуска из описания раздачи (0 - не указан)
 };
 
 // Загрузка индекса. dir - папка с catalog.json и catalog.pak. false, если каталога нет (приложение работает и без него).
