@@ -361,6 +361,7 @@ static std::vector<std::string> appmeta_dirs() {   // у игр на EXT опи�
     v.push_back("/user/appmeta/");
     v.push_back("/system_data/priv/appmeta/");
     for (int k = 0; k < 10; k++) v.push_back("/mnt/ext" + std::to_string(k) + "/user/appmeta/");
+    for (int k = 0; k < 10; k++) v.push_back("/mnt/ext" + std::to_string(k) + "/system_data/priv/appmeta/");   // так у игр на EXT на самом деле
     return v;
 }
 
