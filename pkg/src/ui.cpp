@@ -10,6 +10,7 @@
 #include "i18n.h"
 #include "torrents.h"
 #include "patches.h"
+#include <unistd.h>
 #include "utf8.h"
 
 #include <stdio.h>
@@ -1895,16 +1896,35 @@ static unsigned pad_read()
 
 // ---------------------------------------------------------------- вход
 
+// Проверка заплаток каталога в интернете: один раз за запуск, в фоновом потоке, и только при подтверждённом интернете.
+// Скачанное применится при следующем запуске приложения.
+static int g_patchLast = 0;
+static void* patch_thread(void*)
+{
+    if (!net_online_cached(2000, true)) { logf_("ui: заплатки: интернета нет, проверку пропускаем"); return nullptr; }
+    std::string base = "/data/ps4installer_app/catalog/catalog.json";
+    if (access(base.c_str(), R_OK) != 0) base = "/app0/assets/misc/catalog.json";
+    patches_configure("https://github.com/sergiopoverony/ps4catalog/releases/latest/download/", "/data/ps4installer_app/catalog", base);
+    std::string info;
+    int got = 0;
+    PatchCheck pc = patches_check_online(g_patchLast, info, &got);
+    logf_("ui: заплатки из интернета: %s (код %d)", info.c_str(), (int)pc);
+    return nullptr;
+}
+static void patch_kick(int lastApplied)
+{
+    g_patchLast = lastApplied;
+    pthread_t t;
+    if (pthread_create(&t, nullptr, patch_thread, nullptr) == 0) pthread_detach(t);
+}
+
 bool ui_init()
 {
     // Для проверок: каталог можно положить на консоль в /data/ps4installer_app/catalog/ (тогда PKG собирают без него).
     // Основной каталог: на консоли (если PKG собран без него) или вшитый в PKG; заплатки catalog_2.json ... всегда ищем на консоли.
     if (!catalog_load("/data/ps4installer_app/catalog")) catalog_load("/app0/assets/misc", "/data/ps4installer_app/catalog");
-    {   // заплатки из интернета: пока заглушка (адрес не выбран), в сеть не ходим
-        std::string info;
-        PatchCheck pc = patches_check_online(catalog_patch_last(), info);
-        logf_("ui: заплатки каталога: применено %d (последняя %d); из интернета: %s", catalog_patch_count(), catalog_patch_last(), pc == PC_NOT_CONFIGURED ? info.c_str() : "проверено");
-    }
+    logf_("ui: заплатки каталога: применено %d (последняя %d)", catalog_patch_count(), catalog_patch_last());
+    patch_kick(catalog_patch_last());   // проверка обновлений каталога в фоне и только если есть интернет
     catalog_pos_read();   // читаем здесь: фоновые потоки собирают каталог без обращения к файлу состояния
     g_scene = new Scene2D(FRAME_WIDTH, FRAME_HEIGHT, FRAME_DEPTH);
     if (!g_scene->Init(0xC000000, 2)) { logf_("ui: scene init FAILED"); return false; }

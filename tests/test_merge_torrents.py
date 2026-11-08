@@ -166,5 +166,26 @@ class TestYear(unittest.TestCase):
         self.assertEqual(M.year_of({"Описание (500 симв.)": "без года"}), 0)
 
 
+class TestRelease(unittest.TestCase):
+    def test_make_release(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
+        import make_release as R
+        with tempfile.TemporaryDirectory() as td:
+            d, o = Path(td) / "data", Path(td) / "rel"
+            d.mkdir()
+            (d / "catalog.json").write_text("{}")   # основной каталог в выпуск не идёт
+            (d / "catalog_2.json").write_text('{"games":[]}')
+            (d / "catalog_2.pak").write_bytes(b"abc")
+            (d / "catalog_3.json").write_text('{"games":[]}')
+            idx = R.make_release(d, o)
+            self.assertEqual(idx["patch"], 3)
+            self.assertEqual([p["n"] for p in idx["patches"]], [2, 3])
+            self.assertEqual(len(idx["patches"][0]["files"]), 2)
+            self.assertFalse((o / "catalog.json").exists())
+            j = json.loads((o / "index.json").read_text(encoding="utf-8"))
+            self.assertEqual(j["patches"][0]["files"][1]["sha256"], "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+            self.assertEqual((o / "catalog_2.pak").read_bytes(), b"abc")
+
+
 if __name__ == "__main__":
     unittest.main()
