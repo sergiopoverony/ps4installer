@@ -13,8 +13,8 @@
 | `GET /scan[?fresh=1]` | список пакетов: `{"ok":true,"count":N,"packages":[{path,content_id,title_id,kind,size,pkg_size,zero_blocks,patch,title,ver,backport,incomplete,rus,dlc_name}]}`; отсортирован по размеру (от большего). Кэш 30 с; `fresh=1` обходит кэш, но не чаще раза в 3 с |
 | `GET /free` | `{"ok":true,"free_bytes":N,"total_bytes":M}` для `/user` |
 | `GET /installed` | `{"ok":true,"title_ids":[...]}` — установленные приложения |
-| `GET /installed_games` | `{"ok":true,"games":[{"id":"CUSA..","title":".."}]}` — название из `param.sfo` по путям `/user/appmeta/<ID>/param.sfo`, `/system_data/priv/appmeta/...`, `/user/app/<ID>/sce_sys/param.sfo` |
-| `GET /appicon?id=CUSA..` | `icon0.png` установленной игры |
+| `GET /installed_games` | `{"ok":true,"games":[{"id":"CUSA..","title":"..","loc":"HDD|EXT"}]}` — название из `param.sfo`; ищется в `/user/appmeta/<ID>/`, `/system_data/priv/appmeta/<ID>/`, `/mnt/extN/user/appmeta/...`, `/mnt/extN/system_data/priv/appmeta/...`, в корне игры (`/user/app/<ID>/` или `/mnt/extN/user/app/<ID>/`); у игр на расширенном хранилище (EXT) название и иконка могут быть внутри `app.pkg` |
+| `GET /appicon?id=CUSA..` | `icon0.png` установленной игры; если рядом файла нет (игра на EXT) — берётся из `app.pkg` игры |
 | `GET /icon?path=/mnt/usb0/x.pkg` | значок из самого PKG (запись `0x1200`); путь должен пройти `path_allowed` |
 | `POST /install` | тело `{"paths":["/mnt/usb0/a.pkg", ...]}` (до 500). Проверяет, планирует и ставит в очередь. Ответ: `{"ok":true,"queued":N,"order":[путь,...],"skipped":[{path,reason}],"need":N,"free":M}` |
 | `GET /status` | `{"version","state":"running|idle","jobs":[{path,content_id,title_id,kind,size,length,transferred,status,message}],"log":[последние 15 строк журнала]}` |
@@ -22,6 +22,8 @@
 | `POST /launch` | `{"title_ids":["CUSA00000"]}` — запускает установленную игру (`sceSystemServiceLaunchApp`, пользователь `0xFF`) |
 | `POST /uninstall` | `{"title_ids":["CUSA00000"]}` — удаляет установленное приложение (`sceAppInstUtilAppUnInstall`). `409 busy`, пока идёт установка; `403 self` для самого магазина `OFST00001`; `404 not_installed` |
 | `POST /delete_files` | `{"paths":[...]}` — физически удаляет `.pkg` с носителя. Только пути из `path_allowed`; если хоть один не из разрешённых — `403 path_not_allowed` и ничего не удалено; `409 busy` во время установки. Ответ `{"ok":true|false,"deleted":N,"failed":"пути через запятую"}` |
+| `GET /usb` | `{"ok":true,"roots":["/mnt/usb0",...]}` — подключённые флешки (точка считается подключённой, если у неё свой `st_dev` или в ней что-то лежит); приложение само в `/mnt` не заглядывает |
+| `POST /write_magnet` | `{"args":["/mnt/usb1","Имя_magnet.txt","magnet:?..."]}` — пишет magnet-ссылку файлом в корень флешки. Имя обязано оканчиваться на `_magnet.txt`, без папок и точек в начале; текст — `magnet:?...` до 4 КиБ; флешка — из `/usb`. Нужен для вкладки «Избранное» (раздачи ставит торрент-клиент ps4torrent, не эта служба) |
 | `POST /quit` | служба завершается (используется при замене на новую версию) |
 
 Коды ошибок `/install`: `400 bad_request` (пустой список, не JSON, >500), `400 bad_path`, `422 bad_pkg` (заголовок не разобран:
