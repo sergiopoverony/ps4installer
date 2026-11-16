@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #pragma once
 // Запросы игр через торрент-клиент ps4torrent (тот же консоль, его папка /data/pkg/torrents и страница 127.0.0.1:8787).
 // Запрос = файл <хэш>.magnet в папке торрентов: ps4torrent сам подхватит его, найдёт раздающих, получит описание раздачи

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #pragma once
 // SHA-256 (для проверки скачанных заплаток каталога).
 #include <string>

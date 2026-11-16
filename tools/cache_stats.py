@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """
 cache_stats.py - сводка по скачанному кэшу (data/cache): сколько игр полных, чего не хватает
 у неполных и примеры Title ID. Ничего не качает и не меняет.

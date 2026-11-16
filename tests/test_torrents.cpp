@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 // Проверка запросов через ps4torrent: tests/test_torrents.py поднимает подставной /status и передаёт папку и порт.
 #include <stdio.h>
 #include <stdlib.h>

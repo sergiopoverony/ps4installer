@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Собирает и запускает tests/test_catalog.cpp на маленьком каталоге, собранном тем же форматом, что и tools/fetch_catalog.py."""
 import io
 import json

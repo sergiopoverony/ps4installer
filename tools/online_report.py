@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """
 online_report.py - отчёт по режимам игр (только сетевые / есть одиночный) из data/cache.
 Ничего не качает и не меняет. Сначала нужно добрать строки:

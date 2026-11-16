@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 // Проверка чтения каталога: tests/test_catalog.py готовит папку с catalog.json/catalog.pak и передаёт путь.
 #include <stdio.h>
 #include <stdlib.h>

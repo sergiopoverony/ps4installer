@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/stat.h>

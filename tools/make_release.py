@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Готовит выпуск (Release) для репозитория с заплатками каталога: папка с index.json и файлами catalog_N.json / catalog_N.pak.
 
     python tools/make_release.py data release

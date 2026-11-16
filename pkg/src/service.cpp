@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #include "service.h"
 #include "httpc.h"
 #include "i18n.h"

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 // Заплатки каталога: catalog_2.json (+ pak), catalog_3.json ...
 #include "catalog.h"
 #include <stdio.h>

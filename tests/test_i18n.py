@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Файлы языков: одинаковые ключи, одинаковые подстановки, все ключи из кода есть в файлах."""
 import re
 import unittest

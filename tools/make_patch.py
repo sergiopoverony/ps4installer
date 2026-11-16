@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Заплатка каталога: только то, что изменилось с прошлого раза (catalog_N.json + catalog_N.pak).
 
 Использование (ежемесячно, когда выходит новая выгрузка rutracker):

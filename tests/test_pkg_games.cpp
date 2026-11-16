@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 // Тесты логики приложения без консоли: группировка игр, перенос строк, размеры.
 // Сборка и запуск: tests/test_pkg_games.py
 #include <cassert>

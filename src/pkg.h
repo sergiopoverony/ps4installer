@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #pragma once
 
 #include <cstdint>
@@ -19,8 +21,8 @@ struct PkgInfo {
     std::string path;        // путь, как его видит служба (/data/pkg/... или /mnt/usbN/...)
     uint64_t file_size = 0;  // размер файла на диске
     uint64_t pkg_size = 0;   // размер из заголовка
-    std::string content_id;  // 36 символов, например UP0006-CUSA15080_00-STARWARSQUADRONS
-    std::string title_id;    // CUSA15080
+    std::string content_id;  // 36 символов, например UP0000-CUSA00000_00-EXAMPLEGAME00000
+    std::string title_id;    // CUSA00000
     uint32_t content_type = 0;
     uint32_t flags = 0;
     std::string kind;        // game | patch | dlc | dlc_nodata | delta_patch

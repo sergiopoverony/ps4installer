@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #pragma once
 // Загрузка по адресу http:// или https://.
 //  http://  - обычным клиентом приложения (httpc); в основном для проверок на ПК.

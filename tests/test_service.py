@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """
 Проверка службы на ПК: собирает src/*.cpp с -DHOST_TEST (заглушки вместо консоли),
 запускает настоящий HTTP-сервер и гоняет его API на поддельных PKG.

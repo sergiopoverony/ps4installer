@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #pragma once
 // Офлайн-каталог игр: data/catalog.json (индекс) + data/catalog.pak (JPEG и тексты по смещениям).
 // Оба файла вшиты в PKG: /app0/assets/misc/ (или для проверок /data/ps4installer_app/catalog/). Здесь нет ничего консольного - можно проверять на ПК.

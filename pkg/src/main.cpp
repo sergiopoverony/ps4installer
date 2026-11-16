@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #include <stdio.h>
 #include <signal.h>
 #include <sys/stat.h>

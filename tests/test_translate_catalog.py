@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Тесты tools/translate_catalog.py на фейковом движке (без интернета и без Argos)."""
 import json
 import sys

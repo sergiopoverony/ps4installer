@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Рисует значки кнопок геймпада для приложения: pkg/assets/images/btn_*.png (с прозрачностью).
 Рисуем в 8 раз крупнее и уменьшаем: края получаются гладкими. Размеры должны совпадать с ICON_S в pkg/src/ui.cpp.
 Запуск: python3 tools/make_button_icons.py"""

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 // Тексты интерфейса по языкам: файлы assets/misc/lang_<код>.txt, строки вида «ключ=текст».
 // Сначала грузится en.txt (запасной), поверх него - файл языка системы. Нет ключа - показывается сам ключ.
 #pragma once

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """
 fetch_catalog.py - собирает офлайн-каталог игр PS4 для приложения ps4installer.
 

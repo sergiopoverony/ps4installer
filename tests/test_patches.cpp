@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 // Загрузка заплаток: адрес и папка передаются аргументами. Сервер - python (tests/test_patches.py).
 #include <stdio.h>
 #include <stdlib.h>

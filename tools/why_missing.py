@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Почему игры нет в каталоге: python3 tools/why_missing.py "hollow knight" ratchet valhalla ...
 Ищет по data/ps4_catalog.json и показывает состояние кэша и попадание в data/catalog.json."""
 import json, re, sys

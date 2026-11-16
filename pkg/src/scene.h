@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #pragma once
 // Экран 1920x1080: своя копия Scene2D из примеров OpenOrbis.
 // Отличия: нет зависимости от log.h примеров, всегда есть шрифт (FreeType),

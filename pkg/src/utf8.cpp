@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #include "utf8.h"
 
 int decode_utf8(const unsigned char*& p)

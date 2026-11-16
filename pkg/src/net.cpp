@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 // Сеть для payload на ps4-payload-sdk (FreeBSD-совместимые сокеты).
 // Отличия от версии для OpenOrbis: DNS делает системная библиотека SDK (getaddrinfo),
 // SO_NBIO и ручная проверка errno == 36 не нужны (EINPROGRESS здесь и есть 36).

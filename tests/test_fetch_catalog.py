@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Тесты tools/fetch_catalog.py без интернета: сеть подменяется заглушкой."""
 import io
 import json
@@ -87,12 +89,12 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(r["desc"], "Первый абзац.\n\nВторой абзац & всё.")
 
     def test_real_page_structure(self):
-        """Фикстура собрана из настоящей страницы PS Store (блок media-carousel + абзац overview)."""
-        html = (Path(__file__).resolve().parent / "fixtures" / "ps_store_cusa15080.html").read_text(encoding="utf-8")
-        r = fc.parse_page(html, "UP0006-CUSA15080_00-STARWARSQUADRONS")
-        self.assertEqual(r["name"], "STAR WARS™: Squadrons")
+        """Синтетическая страница той же структуры, что у магазина (блок media-carousel + абзац overview)."""
+        html = (Path(__file__).resolve().parent / "fixtures" / "synthetic_store_page.html").read_text(encoding="utf-8")
+        r = fc.parse_page(html, "UP0000-CUSA00000_00-EXAMPLEGAME00000")
+        self.assertEqual(r["name"], "Example Game")
         self.assertEqual(len(r["shots"]), 7)
-        self.assertTrue(all(u.startswith("https://image.api.playstation.com/") for u in r["shots"]))
+        self.assertTrue(all(u.startswith("https://example.com/") for u in r["shots"]))
         self.assertEqual(r["desc"], "Synthetic test description for a game.\n\nSecond paragraph & more text.\n\nThird paragraph.")
 
     def test_parse_refs(self):

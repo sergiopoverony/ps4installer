@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Загрузка заплаток каталога (pkg/src/patches.cpp + https.cpp): подставной сервер выпуска, проверка сумм, основного каталога и имён файлов."""
 import functools
 import http.server

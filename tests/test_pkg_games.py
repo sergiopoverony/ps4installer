@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Собирает и запускает tests/test_pkg_games.cpp (логика приложения без консоли)."""
 import subprocess
 import sys

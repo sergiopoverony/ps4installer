@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Запросы игр через ps4torrent (pkg/src/torrents.cpp): файл <хэш>.magnet, отмена, состояние по /status подставного клиента."""
 import http.server
 import json

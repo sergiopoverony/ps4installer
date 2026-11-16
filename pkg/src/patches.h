@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #pragma once
 // Заплатки каталога из интернета (catalog_N.json + catalog_N.pak) с GitHub Releases репозитория ps4catalog.
 // Приложение читает файл index.json последнего выпуска, сравнивает номер с применённой заплаткой, скачивает недостающие

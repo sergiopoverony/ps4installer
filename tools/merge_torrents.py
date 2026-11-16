@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Склеивает офлайн-каталог (data/catalog.json + catalog.pak) с таблицей раздач рутрекера (tools/rutracker_table.py).
 
     python tools/merge_torrents.py data ps4_games.csv            # data - папка с catalog.json и catalog.pak

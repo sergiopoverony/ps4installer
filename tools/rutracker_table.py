@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Читает выгрузку рутрекера (rutracker-YYYYMMDD.xml.xz, ~30 ГБ) и делает таблицу игр ветки PS4 (форум 973) в CSV для tools/merge_torrents.py.
 
     python tools/rutracker_table.py "D:\\TORRENT\\RUTRACKER_BASE\\rutracker-20261031.xml.xz" "D:\\TORRENT\\RUTRACKER_BASE\\ps4_games.csv"

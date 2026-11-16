@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 SergioPoverony
 """Значки пометок на плитках: русификатор (флаг), патч (стрелка вверх), DLC (плюс). PNG 40x40 в pkg/assets/images/."""
 import os
 from PIL import Image, ImageDraw

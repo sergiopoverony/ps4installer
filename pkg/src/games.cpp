@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 #include "games.h"
 #include "i18n.h"
 #include "utf8.h"

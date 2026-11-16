@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 SergioPoverony
 // Юнит-тесты разбора PKG, путей и JSON (без консоли). Сборка и запуск: tests/test_service.py
 #include <cassert>
 #include <cstdio>
@@ -24,21 +26,21 @@ int main() {
     PkgInfo info;
     std::string err;
 
-    auto h = make_header("UP0006-CUSA15080_00-STARWARSQUADRONS", 0x1A, 0);
+    auto h = make_header("UP0000-CUSA00000_00-EXAMPLEGAME00000", 0x1A, 0);
     assert(pkg_parse_header(h.data(), h.size(), &info, &err));
-    assert(info.title_id == "CUSA15080" && info.kind == "game" && !info.is_patch);
+    assert(info.title_id == "CUSA00000" && info.kind == "game" && !info.is_patch);
 
-    h = make_header("UP0006-CUSA15080_00-STARWARSQUADRONS", 0x1A, 0x40000000);
+    h = make_header("UP0000-CUSA00000_00-EXAMPLEGAME00000", 0x1A, 0x40000000);
     assert(pkg_parse_header(h.data(), h.size(), &info, &err) && info.kind == "patch" && info.is_patch);
-    h = make_header("UP0006-CUSA15080_00-STARWARSQUADRONS", 0x1B, 0);
+    h = make_header("UP0000-CUSA00000_00-EXAMPLEGAME00000", 0x1B, 0);
     assert(pkg_parse_header(h.data(), h.size(), &info, &err) && info.kind == "dlc");
-    h = make_header("UP0006-CUSA15080_00-STARWARSQUADRONS", 0x1E, 0);
+    h = make_header("UP0000-CUSA00000_00-EXAMPLEGAME00000", 0x1E, 0);
     assert(pkg_parse_header(h.data(), h.size(), &info, &err) && info.kind == "delta_patch");
-    h = make_header("UP0006-CUSA15080_00-STARWARSQUADRONS", 0x55, 0);
+    h = make_header("UP0000-CUSA00000_00-EXAMPLEGAME00000", 0x55, 0);
     assert(!pkg_parse_header(h.data(), h.size(), &info, &err));          // неизвестный тип
     h = make_header("bad content id", 0x1A, 0);
     assert(!pkg_parse_header(h.data(), h.size(), &info, &err));          // плохой content id
-    h = make_header("UP0006-CUSA15080_00-STARWARSQUADRONS", 0x1A, 0);
+    h = make_header("UP0000-CUSA00000_00-EXAMPLEGAME00000", 0x1A, 0);
     h[0] = 0;
     assert(!pkg_parse_header(h.data(), h.size(), &info, &err));          // нет сигнатуры
     assert(!pkg_parse_header(h.data(), 100, &info, &err));               // слишком коротко
@@ -174,7 +176,7 @@ int main() {
     {
         const char* path = "/tmp/ps4inst_sfo_test.pkg";
         std::vector<uint8_t> f(0x3000, 0);
-        auto h2 = make_header("UP0006-CUSA15080_00-STARWARSQUADRONS", 0x1A, 0x40000000);
+        auto h2 = make_header("UP0000-CUSA00000_00-EXAMPLEGAME00000", 0x1A, 0x40000000);
         memcpy(f.data(), h2.data(), h2.size());
         put_be32(&f[0x10], 1);       // записей в таблице
         put_be32(&f[0x18], 0x2000);  // смещение таблицы
